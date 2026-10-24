@@ -41,15 +41,23 @@ class MediaRemoteAdapter: ObservableObject {
     /// Path to the framework
     private let frameworkPath: String
     
+    /// Path to the test client used by the adapter's `test` command
+    private let testClientPath: String
+    
+    /// Whether the startup `test` command is still running
+    private var isTesting = false
+    
     // MARK: - Initialization
     
     /// Initialize with paths to the adapter script and framework
     /// - Parameters:
     ///   - scriptPath: Path to mediaremote-adapter.pl
     ///   - frameworkPath: Path to MediaRemoteAdapter.framework
-    init(scriptPath: String, frameworkPath: String) {
+    ///   - testClientPath: Path to MediaRemoteAdapterTestClient
+    init(scriptPath: String, frameworkPath: String, testClientPath: String) {
         self.scriptPath = scriptPath
         self.frameworkPath = frameworkPath
+        self.testClientPath = testClientPath
     }
     
     /// Convenience initializer using the copy bundled inside the app
@@ -60,19 +68,59 @@ class MediaRemoteAdapter: ObservableObject {
         self.init(
             scriptPath: bundle.url(forResource: "mediaremote-adapter", withExtension: "pl")?.path ?? "",
             frameworkPath: bundle.privateFrameworksURL?
-                .appendingPathComponent("MediaRemoteAdapter.framework").path ?? ""
+                .appendingPathComponent("MediaRemoteAdapter.framework").path ?? "",
+            testClientPath: bundle.url(forAuxiliaryExecutable: "MediaRemoteAdapterTestClient")?.path ?? ""
         )
     }
     
     // MARK: - Public Methods
     
-    /// Start streaming now playing information
+    /// Check that the adapter works on this macOS version, then start streaming
     func start() {
-        guard !isRunning else {
+        guard !isRunning, !isTesting else {
             print("⚠️ Adapter already running")
             return
         }
         
+        print("🧪 Testing mediaremote-adapter...")
+        isTesting = true
+        
+        let test = Process()
+        test.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        test.arguments = [scriptPath, frameworkPath, testClientPath, "test"]
+        test.standardOutput = FileHandle.nullDevice
+        test.standardError = FileHandle.nullDevice
+        test.terminationHandler = { [weak self] process in
+            let status = process.terminationStatus
+            Task { @MainActor in
+                self?.finishTest(status: status)
+            }
+        }
+        
+        do {
+            try test.run()
+        } catch {
+            print("❌ Failed to run adapter test: \(error)")
+            isTesting = false
+            lastError = "Failed to start: \(error.localizedDescription)"
+        }
+    }
+    
+    /// Start streaming if the `test` command succeeded (exit code 0)
+    private func finishTest(status: Int32) {
+        isTesting = false
+        
+        guard status == 0 else {
+            print("❌ Adapter test failed with exit code \(status)")
+            lastError = "Now playing info isn't available on this macOS version"
+            return
+        }
+        
+        startStream()
+    }
+    
+    /// Start streaming now playing information
+    private func startStream() {
         print("🚀 Starting mediaremote-adapter...")
         
         // Create the process

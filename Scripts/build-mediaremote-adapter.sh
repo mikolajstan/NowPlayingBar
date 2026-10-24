@@ -1,9 +1,11 @@
 #!/bin/bash
 #
-# Builds the vendored mediaremote-adapter framework and bundles it, together
-# with its Perl script, inside the app. Runs as an Xcode build phase.
+# Builds the vendored mediaremote-adapter framework and test client and
+# bundles them, together with the Perl script, inside the app. Runs as an
+# Xcode build phase.
 #
 #   Contents/Frameworks/MediaRemoteAdapter.framework
+#   Contents/MacOS/MediaRemoteAdapterTestClient   (used by the `test` command)
 #   Contents/Resources/mediaremote-adapter.pl
 #
 # The app never links the framework. It runs
@@ -16,6 +18,8 @@ ADAPTER_DIR="${SRCROOT}/Vendor/mediaremote-adapter"
 NAME="MediaRemoteAdapter"
 FRAMEWORK="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/${NAME}.framework"
 RESOURCES="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+TEST_CLIENT="${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}/${NAME}TestClient"
+SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:--}"
 
 # Keep in sync with ADAPTER_SOURCES in upstream's CMakeLists.txt
 SOURCES=(
@@ -81,11 +85,20 @@ cat > "${FRAMEWORK}/Versions/A/Resources/Info.plist" <<EOF
 </plist>
 EOF
 
+mkdir -p "$(dirname "${TEST_CLIENT}")"
+xcrun clang "${ARCH_FLAGS[@]}" \
+    -mmacosx-version-min="${MACOSX_DEPLOYMENT_TARGET}" \
+    -fobjc-arc -O2 \
+    -Isrc/test \
+    -framework Foundation -framework MediaPlayer \
+    src/test/main.m src/test/NowPlayingTest.m \
+    -o "${TEST_CLIENT}"
+
 # Nested code must be signed before Xcode signs the app.
 # "-" (ad hoc) when the target signs to run locally.
 codesign --force --options runtime --timestamp=none \
-    --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" \
-    "${FRAMEWORK}"
+    --sign "${SIGN_IDENTITY}" \
+    "${FRAMEWORK}" "${TEST_CLIENT}"
 
 mkdir -p "${RESOURCES}"
 cp "${ADAPTER_DIR}/bin/mediaremote-adapter.pl" "${RESOURCES}/"
