@@ -52,14 +52,15 @@ class MediaRemoteAdapter: ObservableObject {
         self.frameworkPath = frameworkPath
     }
     
-    /// Convenience initializer using default paths in the user's home directory
+    /// Convenience initializer using the copy bundled inside the app
+    /// (built by Scripts/build-mediaremote-adapter.sh)
     convenience init() {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        let adapterDir = "\(homeDir)/apps/mediaremote-adapter"
-        
+        let bundle = Bundle.main
+
         self.init(
-            scriptPath: "\(adapterDir)/bin/mediaremote-adapter.pl",
-            frameworkPath: "\(adapterDir)/build/MediaRemoteAdapter.framework"
+            scriptPath: bundle.url(forResource: "mediaremote-adapter", withExtension: "pl")?.path ?? "",
+            frameworkPath: bundle.privateFrameworksURL?
+                .appendingPathComponent("MediaRemoteAdapter.framework").path ?? ""
         )
     }
     
