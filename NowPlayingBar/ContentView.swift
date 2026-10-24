@@ -148,7 +148,7 @@ struct ContentView: View {
                         stopTimer()
                     }
                 }
-            } else {
+            } else if adapter.lastError == nil {
                 // Adapter not running yet
                 VStack {
                     ProgressView()
