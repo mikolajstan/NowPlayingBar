@@ -45,6 +45,9 @@ private struct MenuBarSettings: View {
 
             Section("Background") {
                 Toggle("Show background", isOn: $settings.menuBarBackgroundEnabled)
+                LabeledSlider("Horizontal padding", value: $settings.menuBarHorizontalPadding, in: 0...20, step: 1, unit: "pt")
+                LabeledSlider("Vertical inset", value: $settings.menuBarBackgroundInset, in: 0...6, step: 1, unit: "pt")
+                    .disabled(!settings.menuBarBackgroundEnabled)
                 ColorPicker("Color", selection: $settings.menuBarBackgroundColor, supportsOpacity: false)
                     .disabled(!settings.menuBarBackgroundEnabled)
                 LabeledSlider("Opacity", value: $settings.menuBarBackgroundOpacity, in: 0...1, step: 0.05, percent: true)
@@ -71,6 +74,10 @@ private struct PopoverSettings: View {
 
     var body: some View {
         Form {
+            Section("Behavior") {
+                Toggle("Stay open when switching to another app", isOn: $settings.popoverStaysOpen)
+            }
+
             Section("Layout") {
                 LabeledSlider("Artwork size", value: $settings.popoverArtworkSize, in: 120...320, step: 10, unit: "pt")
                 LabeledSlider("Spacing", value: $settings.popoverSpacing, in: 4...30, step: 1, unit: "pt")

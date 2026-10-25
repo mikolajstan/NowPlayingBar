@@ -18,7 +18,6 @@ struct MenuBarLabel: View {
 
     static let artworkSize: CGFloat = 16
     static let spacing: CGFloat = 5
-    static let horizontalPadding: CGFloat = 6
     static let font = NSFont.menuBarFont(ofSize: 0)
 
     var body: some View {
@@ -51,20 +50,19 @@ struct MenuBarLabel: View {
                 font: Self.font,
                 color: textColor(isPaused: isPaused),
                 speed: settings.menuBarScrollSpeed,
-                isScrolling: !isPaused,
                 textWidth: $textWidth
             )
         }
         // Only the content dims while paused, so the background keeps its own opacity
         .opacity(isPaused ? settings.menuBarPausedOpacity : 1)
-        .padding(.horizontal, Self.horizontalPadding)
+        .padding(.horizontal, settings.menuBarHorizontalPadding)
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity)
         .background {
             if settings.menuBarBackgroundEnabled {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(settings.menuBarBackgroundColor.opacity(settings.menuBarBackgroundOpacity))
-                    .padding(.vertical, 2)
+                    .padding(.vertical, settings.menuBarBackgroundInset)
             }
         }
         .animation(.easeInOut(duration: 0.25), value: isPaused)
@@ -113,7 +111,7 @@ struct MenuBarLabel: View {
 
     /// Fixed at the configured width, or shrunk to the text when that's enabled
     private func itemWidth(showArtwork: Bool) -> CGFloat {
-        let chrome = Self.horizontalPadding * 2 + (showArtwork ? Self.artworkSize + Self.spacing : 0)
+        let chrome = settings.menuBarHorizontalPadding * 2 + (showArtwork ? Self.artworkSize + Self.spacing : 0)
         let maxWidth = max(CGFloat(settings.menuBarWidth), chrome + 20)
         guard settings.menuBarShrinkToFit, textWidth > 0 else { return maxWidth }
         return min(chrome + ceil(textWidth), maxWidth)
@@ -124,9 +122,9 @@ struct MenuBarLabel: View {
 
 /// Single-line text that scrolls when it doesn't fit, pausing at the start of each loop.
 ///
-/// The scrolling is a Core Animation animation on a layer, so it runs in the render server at
-/// sub-pixel precision and stays smooth at any speed (redrawing from SwiftUI every frame moved
-/// the text in uneven whole-pixel steps).
+/// The text is drawn by `CATextLayer`s and moved by a Core Animation animation, so it runs in
+/// the render server at sub-pixel precision and stays smooth at any speed. (Text views would only
+/// draw the part that's visible at the start, leaving the rest of a long title blank.)
 struct MarqueeText: NSViewRepresentable {
     let text: String
     let font: NSFont
@@ -134,7 +132,6 @@ struct MarqueeText: NSViewRepresentable {
     let color: NSColor?
     /// Points per second
     let speed: Double
-    let isScrolling: Bool
     /// Width of the full text on one line
     @Binding var textWidth: CGFloat
 
@@ -143,7 +140,7 @@ struct MarqueeText: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MarqueeView, context: Context) {
-        view.configure(text: text, font: font, color: color, speed: speed, isScrolling: isScrolling)
+        view.configure(text: text, font: font, color: color, speed: speed)
 
         let width = view.textWidth
         if width != textWidth {
@@ -154,14 +151,16 @@ struct MarqueeText: NSViewRepresentable {
 
 final class MarqueeView: NSView {
     /// Holds the text and its repeat; this is what moves
-    private let strip = NSView()
-    private let first = NSTextField(labelWithString: "")
-    private let second = NSTextField(labelWithString: "")
+    private let strip = CALayer()
+    private let first = CATextLayer()
+    private let second = CATextLayer()
     private let fadeMask = CAGradientLayer()
 
     private(set) var textWidth: CGFloat = 0
+    private var text = ""
+    private var font = NSFont.menuBarFont(ofSize: 0)
+    private var color: NSColor?
     private var speed: Double = 0
-    private var isScrolling = false
     /// What the running animation was made for, so it only restarts when something changed
     private var animationKey = ""
 
@@ -176,14 +175,9 @@ final class MarqueeView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.masksToBounds = true
-
-        strip.wantsLayer = true
-        addSubview(strip)
-        for label in [first, second] {
-            label.lineBreakMode = .byClipping
-            label.maximumNumberOfLines = 1
-            strip.addSubview(label)
-        }
+        layer?.addSublayer(strip)
+        strip.addSublayer(first)
+        strip.addSublayer(second)
     }
 
     required init?(coder: NSCoder) {
@@ -193,29 +187,50 @@ final class MarqueeView: NSView {
     /// Clicks go to the status bar button
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func configure(text: String, font: NSFont, color: NSColor?, speed: Double, isScrolling: Bool) {
-        for label in [first, second] {
-            label.stringValue = text
-            label.font = font
-            label.textColor = color ?? .labelColor
-        }
-        textWidth = ceil(first.fittingSize.width)
+    func configure(text: String, font: NSFont, color: NSColor?, speed: Double) {
+        self.text = text
+        self.font = font
+        self.color = color
         self.speed = speed
-        self.isScrolling = isScrolling
+        textWidth = ceil(NSAttributedString(string: text, attributes: [.font: font]).size().width)
+        needsLayout = true
+    }
+
+    /// Menu bar light/dark changes resolve the text color again
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
 
-        let height = first.fittingSize.height
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
+        // Resolve the (possibly dynamic) color for the menu bar's current appearance
+        var cgColor = NSColor.labelColor.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            cgColor = (color ?? .labelColor).cgColor
+        }
+        let attributed = NSAttributedString(string: text, attributes: [
+            .font: font,
+            .foregroundColor: cgColor,
+        ])
+
+        let height = ceil(font.ascender - font.descender + font.leading)
         let y = ((bounds.height - height) / 2).rounded()
-        first.frame = NSRect(x: 0, y: y, width: textWidth, height: height)
-        second.frame = NSRect(x: textWidth + gap, y: y, width: textWidth, height: height)
-        strip.frame = NSRect(x: 0, y: 0, width: textWidth * 2 + gap, height: bounds.height)
+        let scale = window?.backingScaleFactor ?? 2
+        for (index, textLayer) in [first, second].enumerated() {
+            textLayer.string = attributed
+            textLayer.contentsScale = scale
+            textLayer.frame = CGRect(x: CGFloat(index) * (textWidth + gap), y: y, width: textWidth, height: height)
+        }
+        strip.frame = CGRect(x: 0, y: 0, width: textWidth * 2 + gap, height: bounds.height)
 
         let overflows = textWidth > bounds.width + 0.5
-        let scrolls = overflows && isScrolling && speed > 0
+        let scrolls = overflows && speed > 0
         second.isHidden = !scrolls
         updateMask(overflows: overflows, scrolls: scrolls)
         updateAnimation(scrolls: scrolls)
@@ -223,10 +238,6 @@ final class MarqueeView: NSView {
 
     /// Fade both edges while scrolling, only the trailing edge when the text is cut off
     private func updateMask(overflows: Bool, scrolls: Bool) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
-
         guard overflows, bounds.width > fade * 2 else {
             layer?.mask = nil
             return
@@ -247,11 +258,11 @@ final class MarqueeView: NSView {
     }
 
     private func updateAnimation(scrolls: Bool) {
-        let key = scrolls ? "\(first.stringValue)|\(textWidth)|\(speed)" : ""
-        guard key != animationKey || (scrolls && strip.layer?.animation(forKey: "marquee") == nil) else { return }
+        let key = scrolls ? "\(text)|\(textWidth)|\(speed)" : ""
+        guard key != animationKey || (scrolls && strip.animation(forKey: "marquee") == nil) else { return }
         animationKey = key
 
-        strip.layer?.removeAnimation(forKey: "marquee")
+        strip.removeAnimation(forKey: "marquee")
         guard scrolls else { return }
 
         let distance = textWidth + gap
@@ -270,6 +281,6 @@ final class MarqueeView: NSView {
         loop.duration = pause + travel
         loop.repeatCount = .infinity
         loop.isRemovedOnCompletion = false
-        strip.layer?.add(loop, forKey: "marquee")
+        strip.add(loop, forKey: "marquee")
     }
 }

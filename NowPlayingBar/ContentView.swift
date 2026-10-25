@@ -520,15 +520,31 @@ struct CircleButtonStyle: ButtonStyle {
         let diameter: CGFloat
 
         @EnvironmentObject var settings: AppSettings
+        @Environment(\.self) private var environment
         @State private var isHovering = false
+
+        private var fill: Color {
+            isHovering ? settings.buttonHoverColor : settings.buttonBackgroundColor
+        }
+
+        /// Black or white, whichever reads better on the circle's color over the popover
+        /// (an almost opaque dark circle keeps white icons even when the popover turns light)
+        private var iconColor: Color {
+            let circle = fill.resolve(in: environment)
+            let backdrop: Float = environment.colorScheme == .dark ? 0.02 : 0.8
+            // Linear sRGB luminance of the circle blended over the popover
+            let luminance = 0.2126 * circle.linearRed + 0.7152 * circle.linearGreen + 0.0722 * circle.linearBlue
+            let blended = circle.opacity * luminance + (1 - circle.opacity) * backdrop
+            return blended > 0.2 ? .black : .white
+        }
 
         var body: some View {
             configuration.label
-                .foregroundStyle(.primary)
+                .foregroundStyle(iconColor)
                 .frame(width: diameter, height: diameter)
                 .background {
                     Circle()
-                        .fill(isHovering ? settings.buttonHoverColor : settings.buttonBackgroundColor)
+                        .fill(fill)
                 }
                 .overlay {
                     // Barely visible edge, so the button shows even when its color matches the background

@@ -63,6 +63,7 @@ final class StatusItemController: NSObject {
         .environmentObject(settings)
 
         panel.contentView = FirstMouseHostingView(rootView: content)
+        panel.staysOpen = { settings.popoverStaysOpen }
         panel.onOpenSettings = { [weak self] in
             guard let self else { return }
             openSettings(self.panel.frame)
@@ -117,14 +118,15 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func otherWindowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, window !== panel, panel.isVisible else { return }
+        // Only the settings window: menus (e.g. a picker's) post this too
+        guard notification.object is SettingsWindow, panel.isVisible else { return }
         DispatchQueue.main.async { [weak self] in
             self?.panel.makeKey()
         }
     }
 
     @objc private func appDidResignActive() {
-        guard panel.isVisible else { return }
+        guard panel.isVisible, !settings.popoverStaysOpen else { return }
         closePanel()
         lastAutoClose = Date()
     }
@@ -165,6 +167,9 @@ final class PopoverPanel: NSPanel {
     /// Called for ⌘,
     var onOpenSettings: (() -> Void)?
 
+    /// When true, losing focus doesn't close the panel
+    var staysOpen: () -> Bool = { false }
+
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 300, height: 400),
@@ -188,7 +193,7 @@ final class PopoverPanel: NSPanel {
         super.resignKey()
         // Checked on the next run loop pass, once the new key window is known
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.isVisible, !self.isKeyWindow else { return }
+            guard let self, self.isVisible, !self.isKeyWindow, !self.staysOpen() else { return }
             // Stay open while another of the app's windows (Settings) has focus
             if let key = NSApp.keyWindow, key.styleMask.contains(.titled) { return }
             self.orderOut(nil)

@@ -30,6 +30,12 @@ final class AppSettings: ObservableObject {
     /// Marquee speed in points per second
     @Published var menuBarScrollSpeed: Double { didSet { save(menuBarScrollSpeed, .menuBarScrollSpeed) } }
 
+    /// Space between the background's edges and the artwork/text
+    @Published var menuBarHorizontalPadding: Double { didSet { save(menuBarHorizontalPadding, .menuBarHorizontalPadding) } }
+    
+    /// Gap above and below the background (smaller makes it taller)
+    @Published var menuBarBackgroundInset: Double { didSet { save(menuBarBackgroundInset, .menuBarBackgroundInset) } }
+    
     /// Draw a rounded background behind the menu bar item
     @Published var menuBarBackgroundEnabled: Bool { didSet { save(menuBarBackgroundEnabled, .menuBarBackgroundEnabled) } }
     @Published var menuBarBackgroundColor: Color { didSet { save(menuBarBackgroundColor, .menuBarBackgroundColor) } }
@@ -48,6 +54,9 @@ final class AppSettings: ObservableObject {
 
     // MARK: - Popover
 
+    /// Keep the popover open when another app is clicked; it then closes from the menu bar item, Esc or ⌘W
+    @Published var popoverStaysOpen: Bool { didSet { save(popoverStaysOpen, .popoverStaysOpen) } }
+    
     /// Side of the square artwork in points
     @Published var popoverArtworkSize: Double { didSet { save(popoverArtworkSize, .popoverArtworkSize) } }
 
@@ -105,6 +114,8 @@ final class AppSettings: ObservableObject {
         menuBarShowArtwork = defaults.object(forKey: Key.menuBarShowArtwork.rawValue) as? Bool ?? true
         menuBarShowArtist = defaults.object(forKey: Key.menuBarShowArtist.rawValue) as? Bool ?? true
         menuBarScrollSpeed = defaults.object(forKey: Key.menuBarScrollSpeed.rawValue) as? Double ?? 30
+        menuBarHorizontalPadding = defaults.object(forKey: Key.menuBarHorizontalPadding.rawValue) as? Double ?? 6
+        menuBarBackgroundInset = defaults.object(forKey: Key.menuBarBackgroundInset.rawValue) as? Double ?? 2
         menuBarBackgroundEnabled = defaults.object(forKey: Key.menuBarBackgroundEnabled.rawValue) as? Bool ?? true
         menuBarBackgroundColor = Self.color(defaults, .menuBarBackgroundColor) ?? .gray
         menuBarBackgroundOpacity = defaults.object(forKey: Key.menuBarBackgroundOpacity.rawValue) as? Double ?? 0.2
@@ -114,6 +125,7 @@ final class AppSettings: ObservableObject {
         menuBarPausedTintEnabled = defaults.object(forKey: Key.menuBarPausedTintEnabled.rawValue) as? Bool ?? false
         menuBarPausedColor = Self.color(defaults, .menuBarPausedColor) ?? .secondary
 
+        popoverStaysOpen = defaults.object(forKey: Key.popoverStaysOpen.rawValue) as? Bool ?? false
         popoverArtworkSize = defaults.object(forKey: Key.popoverArtworkSize.rawValue) as? Double ?? 220
         popoverTextAlignment = (defaults.string(forKey: Key.popoverTextAlignment.rawValue))
             .flatMap(PopoverTextAlignment.init(rawValue:)) ?? .center
@@ -146,6 +158,8 @@ final class AppSettings: ObservableObject {
         menuBarShowArtwork = fresh.menuBarShowArtwork
         menuBarShowArtist = fresh.menuBarShowArtist
         menuBarScrollSpeed = fresh.menuBarScrollSpeed
+        menuBarHorizontalPadding = fresh.menuBarHorizontalPadding
+        menuBarBackgroundInset = fresh.menuBarBackgroundInset
         menuBarBackgroundEnabled = fresh.menuBarBackgroundEnabled
         menuBarBackgroundColor = fresh.menuBarBackgroundColor
         menuBarBackgroundOpacity = fresh.menuBarBackgroundOpacity
@@ -154,6 +168,7 @@ final class AppSettings: ObservableObject {
         menuBarPausedOpacity = fresh.menuBarPausedOpacity
         menuBarPausedTintEnabled = fresh.menuBarPausedTintEnabled
         menuBarPausedColor = fresh.menuBarPausedColor
+        popoverStaysOpen = fresh.popoverStaysOpen
         popoverArtworkSize = fresh.popoverArtworkSize
         popoverTextAlignment = fresh.popoverTextAlignment
         popoverSpacing = fresh.popoverSpacing
@@ -182,6 +197,7 @@ final class AppSettings: ObservableObject {
         case popoverBlurredBackground, popoverBlurRadius, popoverBackgroundOpacity
         case buttonBackgroundColor, buttonHoverColor, seekBarColor
         case menuBarTextColorEnabled, menuBarTextColor, sourceLabelStyle
+        case menuBarHorizontalPadding, menuBarBackgroundInset, popoverStaysOpen
         case sourceFilterEnabled, allowedDomains, allowedApps, browserTabLookupEnabled
         
         /// Everything except the source settings
