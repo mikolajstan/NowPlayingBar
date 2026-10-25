@@ -22,13 +22,20 @@ struct ContentView: View {
                     // Show now playing info
                     VStack(spacing: 12) {
                         // Album artwork
-                        if let artwork = info.artwork {
+                        if let artwork = adapter.artwork {
                             Image(nsImage: artwork)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                                 .frame(width: 200, height: 200)
                                 .cornerRadius(8)
                                 .shadow(radius: 4)
+                                .opacity(adapter.isChangingTrack ? 0.4 : 1)
+                                .overlay {
+                                    if adapter.isChangingTrack {
+                                        ProgressView()
+                                    }
+                                }
+                                .animation(.easeOut(duration: 0.15), value: adapter.isChangingTrack)
                         } else {
                             // Placeholder when no artwork
                             Image(systemName: "music.note")
@@ -84,13 +91,13 @@ struct ContentView: View {
                         HStack(spacing: 20) {
                             // Previous button
                             Button(action: {
-                                adapter.send(.previousTrack)
+                                changeTrack(.previousTrack)
                             }) {
                                 Image(systemName: "backward.fill")
                                     .font(.title2)
                                     .foregroundColor(.primary)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableButtonStyle())
                             .help("Previous Track")
                             
                             // Play/Pause button
@@ -101,18 +108,18 @@ struct ContentView: View {
                                     .font(.largeTitle)
                                     .foregroundColor(.primary)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableButtonStyle())
                             .help(info.playing == true ? "Pause" : "Play")
                             
                             // Next button
                             Button(action: {
-                                adapter.send(.nextTrack)
+                                changeTrack(.nextTrack)
                             }) {
                                 Image(systemName: "forward.fill")
                                     .font(.title2)
                                     .foregroundColor(.primary)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableButtonStyle())
                             .help("Next Track")
                         }
                         .padding(.top, 4)
@@ -122,6 +129,12 @@ struct ContentView: View {
                         currentElapsedTime = info.currentElapsedTime
                         
                         // Restart timer for live updates
+                        restartTimer(isPlaying: info.playing == true, playbackRate: info.playbackRate ?? 1.0)
+                    }
+                    .onChange(of: adapter.isChangingTrack) { oldValue, newValue in
+                        // Back to the reported position once the change lands (or times out)
+                        guard !newValue else { return }
+                        currentElapsedTime = info.currentElapsedTime
                         restartTimer(isPlaying: info.playing == true, playbackRate: info.playbackRate ?? 1.0)
                     }
                     .onChange(of: info.playing) { oldValue, newValue in
@@ -202,6 +215,13 @@ struct ContentView: View {
     
     // MARK: - Media Commands
     
+    /// Next/previous: reset the progress bar right away instead of waiting for the stream
+    private func changeTrack(_ command: MediaRemoteAdapter.Command) {
+        adapter.send(command)
+        stopTimer()
+        currentElapsedTime = 0
+    }
+    
     private func seekToPosition(_ position: Double) {
         adapter.seek(to: position)
         currentElapsedTime = position
@@ -214,6 +234,19 @@ struct ContentView: View {
         let minutes = totalSeconds / 60
         let remainingSeconds = totalSeconds % 60
         return String(format: "%d:%02d", minutes, remainingSeconds)
+    }
+}
+
+// MARK: - Button Style
+
+/// Plain button that dims and shrinks slightly while pressed, so clicks register visibly
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed ? 0.85 : 1)
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

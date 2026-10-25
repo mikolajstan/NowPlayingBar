@@ -67,15 +67,6 @@ struct NowPlayingInfo: Codable, Equatable {
     
     // MARK: - Computed Properties
     
-    /// Decoded artwork as an NSImage
-    var artwork: NSImage? {
-        guard let artworkData = artworkData,
-              let data = Data(base64Encoded: artworkData) else {
-            return nil
-        }
-        return NSImage(data: data)
-    }
-    
     /// The actual app providing the media (prefers parent bundle ID)
     var sourceApp: String? {
         parentApplicationBundleIdentifier ?? bundleIdentifier

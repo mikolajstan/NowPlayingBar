@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import AppKit
 
 /// Wrapper for the adapter's JSON response
 private struct AdapterResponse: Codable {
@@ -30,6 +31,13 @@ class MediaRemoteAdapter: ObservableObject {
     /// Last error message, if any
     @Published var lastError: String?
     
+    /// Decoded artwork for `nowPlaying`, only re-decoded when the artwork data changes
+    @Published var artwork: NSImage?
+    
+    /// True from a next/previous click until the stream reports the change
+    /// (or a short timeout passes), so the UI can react before the round trip
+    @Published var isChangingTrack: Bool = false
+    
     // MARK: - Private Properties
     
     private var process: Process?
@@ -47,6 +55,17 @@ class MediaRemoteAdapter: ObservableObject {
     /// Whether the startup `test` command is still running
     private var isTesting = false
     
+    /// Path to adapter-command-server.pl, which runs playback commands
+    private let commandServerPath: String
+    
+    /// Long-lived command server and the pipe used to send it commands
+    private var commandProcess: Process?
+    private var commandInput: FileHandle?
+    
+    /// Track shown when next/previous was clicked, and the timeout for `isChangingTrack`
+    private var trackBeforeChange: NowPlayingInfo?
+    private var trackChangeTimeout: Task<Void, Never>?
+    
     // MARK: - Initialization
     
     /// Initialize with paths to the adapter script and framework
@@ -54,10 +73,15 @@ class MediaRemoteAdapter: ObservableObject {
     ///   - scriptPath: Path to mediaremote-adapter.pl
     ///   - frameworkPath: Path to MediaRemoteAdapter.framework
     ///   - testClientPath: Path to MediaRemoteAdapterTestClient
-    init(scriptPath: String, frameworkPath: String, testClientPath: String) {
+    ///   - commandServerPath: Path to adapter-command-server.pl
+    init(scriptPath: String, frameworkPath: String, testClientPath: String, commandServerPath: String) {
         self.scriptPath = scriptPath
         self.frameworkPath = frameworkPath
         self.testClientPath = testClientPath
+        self.commandServerPath = commandServerPath
+        
+        // Writing to a command server that has exited must throw, not kill the app
+        signal(SIGPIPE, SIG_IGN)
     }
     
     /// Convenience initializer using the copy bundled inside the app
@@ -69,7 +93,8 @@ class MediaRemoteAdapter: ObservableObject {
             scriptPath: bundle.url(forResource: "mediaremote-adapter", withExtension: "pl")?.path ?? "",
             frameworkPath: bundle.privateFrameworksURL?
                 .appendingPathComponent("MediaRemoteAdapter.framework").path ?? "",
-            testClientPath: bundle.url(forAuxiliaryExecutable: "MediaRemoteAdapterTestClient")?.path ?? ""
+            testClientPath: bundle.url(forAuxiliaryExecutable: "MediaRemoteAdapterTestClient")?.path ?? "",
+            commandServerPath: bundle.url(forResource: "adapter-command-server", withExtension: "pl")?.path ?? ""
         )
     }
     
@@ -117,6 +142,9 @@ class MediaRemoteAdapter: ObservableObject {
         }
         
         startStream()
+        
+        // Start the command server now so the first click doesn't wait for it
+        startCommandServer()
     }
     
     /// Start streaming now playing information
@@ -165,6 +193,7 @@ class MediaRemoteAdapter: ObservableObject {
         process = nil
         outputPipe = nil
         isRunning = false
+        stopCommandServer()
         
         print("✅ Adapter stopped")
     }
@@ -182,6 +211,9 @@ class MediaRemoteAdapter: ObservableObject {
     
     /// Send a playback command to the now playing application
     func send(_ command: Command) {
+        if command == .nextTrack || command == .previousTrack {
+            beginTrackChange()
+        }
         runCommand(["send", String(command.rawValue)])
     }
     
@@ -192,8 +224,61 @@ class MediaRemoteAdapter: ObservableObject {
         runCommand(["seek", String(micros)])
     }
     
-    /// Run a one-shot adapter command (separate from the stream process)
+    /// Send a command to the command server, restarting it once if it has exited.
+    /// Falls back to a one-shot adapter process if the server can't be used.
     private func runCommand(_ arguments: [String]) {
+        let line = Data((arguments.joined(separator: " ") + "\n").utf8)
+        
+        for attempt in 0..<2 {
+            if attempt > 0 || commandProcess?.isRunning != true {
+                startCommandServer()
+            }
+            guard let input = commandInput else { break }
+            do {
+                try input.write(contentsOf: line)
+                print("✅ Sent command: \(arguments.joined(separator: " "))")
+                return
+            } catch {
+                print("⚠️ Command server write failed: \(error)")
+                stopCommandServer()
+            }
+        }
+        
+        runOneShotCommand(arguments)
+    }
+    
+    /// Start (or restart) adapter-command-server.pl, which loads the framework once
+    private func startCommandServer() {
+        stopCommandServer()
+        guard !commandServerPath.isEmpty else { return }
+        
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        task.arguments = [commandServerPath, frameworkPath]
+        let input = Pipe()
+        task.standardInput = input
+        task.standardOutput = FileHandle.nullDevice
+        
+        do {
+            try task.run()
+            commandProcess = task
+            commandInput = input.fileHandleForWriting
+        } catch {
+            print("❌ Failed to start command server: \(error)")
+        }
+    }
+    
+    private func stopCommandServer() {
+        try? commandInput?.close()
+        commandInput = nil
+        if commandProcess?.isRunning == true {
+            commandProcess?.terminate()
+        }
+        commandProcess = nil
+    }
+    
+    /// Run a one-shot adapter command (separate from the stream process)
+    private func runOneShotCommand(_ arguments: [String]) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
         task.arguments = [scriptPath, frameworkPath] + arguments
@@ -207,9 +292,53 @@ class MediaRemoteAdapter: ObservableObject {
         }
     }
     
+    // MARK: - Track Change Feedback
+    
+    /// Remember the current track and show the "changing" state until it changes
+    private func beginTrackChange() {
+        trackBeforeChange = nowPlaying
+        isChangingTrack = true
+        
+        trackChangeTimeout?.cancel()
+        trackChangeTimeout = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.endTrackChange()
+        }
+    }
+    
+    private func endTrackChange() {
+        trackChangeTimeout?.cancel()
+        trackChangeTimeout = nil
+        trackBeforeChange = nil
+        isChangingTrack = false
+    }
+    
+    /// Apply a stream update on the main actor
+    private func update(_ info: NowPlayingInfo?) {
+        if info?.artworkData != nowPlaying?.artworkData || (artwork == nil && info?.artworkData != nil) {
+            artwork = info?.artworkData
+                .flatMap { Data(base64Encoded: $0) }
+                .flatMap { NSImage(data: $0) }
+        }
+        
+        if isChangingTrack, let before = trackBeforeChange {
+            // A new track, or "previous" restarting the same one
+            let changed = info?.uniqueIdentifier != before.uniqueIdentifier
+                || info?.title != before.title
+                || (info?.elapsedTime ?? 0) < before.currentElapsedTime - 1
+            if changed {
+                endTrackChange()
+            }
+        }
+        
+        nowPlaying = info
+        lastError = nil
+    }
+    
     // MARK: - Private Methods
     
-    /// Read and parse output from the adapter
+    /// Read and parse output from the adapter until the process exits
     nonisolated private func readOutput(from pipe: Pipe) async {
         let fileHandle = pipe.fileHandleForReading
         
@@ -217,17 +346,15 @@ class MediaRemoteAdapter: ObservableObject {
         var buffer = Data()
         
         while true {
-            // Check if we should stop
-            let shouldContinue = await MainActor.run { self.isRunning }
-            guard shouldContinue else { break }
-            
-            // Read available data
+            // Blocks until data arrives; empty means the process ended (or was stopped)
             let data = fileHandle.availableData
             
             if data.isEmpty {
-                // Process ended
                 await MainActor.run {
-                    self.isRunning = false
+                    // Ignore if a newer stream has replaced this one
+                    if self.outputPipe === pipe {
+                        self.isRunning = false
+                    }
                 }
                 break
             }
@@ -251,10 +378,6 @@ class MediaRemoteAdapter: ObservableObject {
     nonisolated private func parseLine(_ data: Data) async {
         guard !data.isEmpty else { return }
         
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print("📄 Raw JSON: \(jsonString)")
-        }
-        
         // Try to decode as NowPlayingInfo
         let decoder = JSONDecoder()
         
@@ -264,8 +387,7 @@ class MediaRemoteAdapter: ObservableObject {
             
             // Update on main thread
             await MainActor.run {
-                self.nowPlaying = info
-                self.lastError = nil
+                self.update(info)
             }
             
             print("🎵 Updated: \(info.title ?? "Uknown") - \(info.artist ?? "Unknown")")
@@ -275,13 +397,13 @@ class MediaRemoteAdapter: ObservableObject {
                 if jsonString.trimmingCharacters(in: .whitespacesAndNewlines) == "null" {
                     // Nothing playing
                     await MainActor.run {
-                        self.nowPlaying = nil
-                        self.lastError = nil
+                        self.update(nil)
                     }
                     print("⏸️ Nothing playing")
                 } else {
+                    // Don't print the whole line: it can hold hundreds of KB of artwork
                     print("⚠️ Failed to decode JSON: \(error)")
-                    print("📄 Raw: \(jsonString)")
+                    print("📄 Raw: \(jsonString.prefix(500))")
                 }
             }
         }
@@ -291,5 +413,6 @@ class MediaRemoteAdapter: ObservableObject {
     
     deinit {
         process?.terminate()
+        commandProcess?.terminate()
     }
 }
