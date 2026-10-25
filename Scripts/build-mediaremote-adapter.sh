@@ -7,7 +7,6 @@
 #   Contents/Frameworks/MediaRemoteAdapter.framework
 #   Contents/MacOS/MediaRemoteAdapterTestClient   (used by the `test` command)
 #   Contents/Resources/mediaremote-adapter.pl
-#   Contents/Resources/adapter-command-server.pl  (playback commands)
 #
 # The app never links the framework. It runs
 # `/usr/bin/perl mediaremote-adapter.pl MediaRemoteAdapter.framework <command>`,
@@ -103,4 +102,3 @@ codesign --force --options runtime --timestamp=none \
 
 mkdir -p "${RESOURCES}"
 cp "${ADAPTER_DIR}/bin/mediaremote-adapter.pl" "${RESOURCES}/"
-cp "${SRCROOT}/Scripts/adapter-command-server.pl" "${RESOURCES}/"

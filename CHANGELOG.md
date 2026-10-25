@@ -2,7 +2,6 @@
 
 ## Unreleased
 
-- Faster next/previous and seek: commands go to a long-lived helper (`Scripts/adapter-command-server.pl`) that loads the adapter once, instead of starting Perl on every click.
 - Instant feedback on next/previous: buttons react when pressed, the artwork dims with a spinner and the progress bar resets until the new track arrives.
 - Artwork is decoded once per track instead of on every redraw, and the full JSON of each update is no longer logged.
 

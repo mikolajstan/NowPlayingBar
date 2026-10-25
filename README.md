@@ -15,7 +15,7 @@ A small macOS menu bar app that shows the track that is currently playing and le
 
 Since macOS 15.4, apps can no longer read the system's Now Playing info directly. NowPlayingBar uses [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), which works around this by running through `/usr/bin/perl`.
 
-The adapter is bundled inside the app, so nothing needs to be installed separately. Its source lives in `Vendor/mediaremote-adapter`, and `Scripts/build-mediaremote-adapter.sh` compiles it into the app during the build. At launch the app runs the adapter's self-test and shows an error in the popover if it fails. Playback commands go through `Scripts/adapter-command-server.pl`, a small helper that keeps the adapter loaded so clicks don't wait for Perl to start.
+The adapter is bundled inside the app, so nothing needs to be installed separately. Its source lives in `Vendor/mediaremote-adapter`, and `Scripts/build-mediaremote-adapter.sh` compiles it into the app during the build. At launch the app runs the adapter's self-test and shows an error in the popover if it fails.
 
 ## Requirements
 

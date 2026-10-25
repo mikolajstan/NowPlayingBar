@@ -55,13 +55,6 @@ class MediaRemoteAdapter: ObservableObject {
     /// Whether the startup `test` command is still running
     private var isTesting = false
     
-    /// Path to adapter-command-server.pl, which runs playback commands
-    private let commandServerPath: String
-    
-    /// Long-lived command server and the pipe used to send it commands
-    private var commandProcess: Process?
-    private var commandInput: FileHandle?
-    
     /// Track shown when next/previous was clicked, and the timeout for `isChangingTrack`
     private var trackBeforeChange: NowPlayingInfo?
     private var trackChangeTimeout: Task<Void, Never>?
@@ -73,15 +66,10 @@ class MediaRemoteAdapter: ObservableObject {
     ///   - scriptPath: Path to mediaremote-adapter.pl
     ///   - frameworkPath: Path to MediaRemoteAdapter.framework
     ///   - testClientPath: Path to MediaRemoteAdapterTestClient
-    ///   - commandServerPath: Path to adapter-command-server.pl
-    init(scriptPath: String, frameworkPath: String, testClientPath: String, commandServerPath: String) {
+    init(scriptPath: String, frameworkPath: String, testClientPath: String) {
         self.scriptPath = scriptPath
         self.frameworkPath = frameworkPath
         self.testClientPath = testClientPath
-        self.commandServerPath = commandServerPath
-        
-        // Writing to a command server that has exited must throw, not kill the app
-        signal(SIGPIPE, SIG_IGN)
     }
     
     /// Convenience initializer using the copy bundled inside the app
@@ -93,8 +81,7 @@ class MediaRemoteAdapter: ObservableObject {
             scriptPath: bundle.url(forResource: "mediaremote-adapter", withExtension: "pl")?.path ?? "",
             frameworkPath: bundle.privateFrameworksURL?
                 .appendingPathComponent("MediaRemoteAdapter.framework").path ?? "",
-            testClientPath: bundle.url(forAuxiliaryExecutable: "MediaRemoteAdapterTestClient")?.path ?? "",
-            commandServerPath: bundle.url(forResource: "adapter-command-server", withExtension: "pl")?.path ?? ""
+            testClientPath: bundle.url(forAuxiliaryExecutable: "MediaRemoteAdapterTestClient")?.path ?? ""
         )
     }
     
@@ -142,9 +129,6 @@ class MediaRemoteAdapter: ObservableObject {
         }
         
         startStream()
-        
-        // Start the command server now so the first click doesn't wait for it
-        startCommandServer()
     }
     
     /// Start streaming now playing information
@@ -193,7 +177,6 @@ class MediaRemoteAdapter: ObservableObject {
         process = nil
         outputPipe = nil
         isRunning = false
-        stopCommandServer()
         
         print("✅ Adapter stopped")
     }
@@ -224,61 +207,8 @@ class MediaRemoteAdapter: ObservableObject {
         runCommand(["seek", String(micros)])
     }
     
-    /// Send a command to the command server, restarting it once if it has exited.
-    /// Falls back to a one-shot adapter process if the server can't be used.
-    private func runCommand(_ arguments: [String]) {
-        let line = Data((arguments.joined(separator: " ") + "\n").utf8)
-        
-        for attempt in 0..<2 {
-            if attempt > 0 || commandProcess?.isRunning != true {
-                startCommandServer()
-            }
-            guard let input = commandInput else { break }
-            do {
-                try input.write(contentsOf: line)
-                print("✅ Sent command: \(arguments.joined(separator: " "))")
-                return
-            } catch {
-                print("⚠️ Command server write failed: \(error)")
-                stopCommandServer()
-            }
-        }
-        
-        runOneShotCommand(arguments)
-    }
-    
-    /// Start (or restart) adapter-command-server.pl, which loads the framework once
-    private func startCommandServer() {
-        stopCommandServer()
-        guard !commandServerPath.isEmpty else { return }
-        
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        task.arguments = [commandServerPath, frameworkPath]
-        let input = Pipe()
-        task.standardInput = input
-        task.standardOutput = FileHandle.nullDevice
-        
-        do {
-            try task.run()
-            commandProcess = task
-            commandInput = input.fileHandleForWriting
-        } catch {
-            print("❌ Failed to start command server: \(error)")
-        }
-    }
-    
-    private func stopCommandServer() {
-        try? commandInput?.close()
-        commandInput = nil
-        if commandProcess?.isRunning == true {
-            commandProcess?.terminate()
-        }
-        commandProcess = nil
-    }
-    
     /// Run a one-shot adapter command (separate from the stream process)
-    private func runOneShotCommand(_ arguments: [String]) {
+    private func runCommand(_ arguments: [String]) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
         task.arguments = [scriptPath, frameworkPath] + arguments
@@ -413,6 +343,5 @@ class MediaRemoteAdapter: ObservableObject {
     
     deinit {
         process?.terminate()
-        commandProcess?.terminate()
     }
 }
