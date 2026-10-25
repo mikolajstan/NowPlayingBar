@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import AppKit
 
 /// Wrapper for the adapter's JSON response
 private struct AdapterResponse: Codable {
@@ -30,6 +31,13 @@ class MediaRemoteAdapter: ObservableObject {
     /// Last error message, if any
     @Published var lastError: String?
     
+    /// Decoded artwork for `nowPlaying`, only re-decoded when the artwork data changes
+    @Published var artwork: NSImage?
+    
+    /// True from a next/previous click until the stream reports the change
+    /// (or a short timeout passes), so the UI can react before the round trip
+    @Published var isChangingTrack: Bool = false
+    
     // MARK: - Private Properties
     
     private var process: Process?
@@ -46,6 +54,10 @@ class MediaRemoteAdapter: ObservableObject {
     
     /// Whether the startup `test` command is still running
     private var isTesting = false
+    
+    /// Track shown when next/previous was clicked, and the timeout for `isChangingTrack`
+    private var trackBeforeChange: NowPlayingInfo?
+    private var trackChangeTimeout: Task<Void, Never>?
     
     // MARK: - Initialization
     
@@ -182,6 +194,9 @@ class MediaRemoteAdapter: ObservableObject {
     
     /// Send a playback command to the now playing application
     func send(_ command: Command) {
+        if command == .nextTrack || command == .previousTrack {
+            beginTrackChange()
+        }
         runCommand(["send", String(command.rawValue)])
     }
     
@@ -207,9 +222,53 @@ class MediaRemoteAdapter: ObservableObject {
         }
     }
     
+    // MARK: - Track Change Feedback
+    
+    /// Remember the current track and show the "changing" state until it changes
+    private func beginTrackChange() {
+        trackBeforeChange = nowPlaying
+        isChangingTrack = true
+        
+        trackChangeTimeout?.cancel()
+        trackChangeTimeout = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.endTrackChange()
+        }
+    }
+    
+    private func endTrackChange() {
+        trackChangeTimeout?.cancel()
+        trackChangeTimeout = nil
+        trackBeforeChange = nil
+        isChangingTrack = false
+    }
+    
+    /// Apply a stream update on the main actor
+    private func update(_ info: NowPlayingInfo?) {
+        if info?.artworkData != nowPlaying?.artworkData || (artwork == nil && info?.artworkData != nil) {
+            artwork = info?.artworkData
+                .flatMap { Data(base64Encoded: $0) }
+                .flatMap { NSImage(data: $0) }
+        }
+        
+        if isChangingTrack, let before = trackBeforeChange {
+            // A new track, or "previous" restarting the same one
+            let changed = info?.uniqueIdentifier != before.uniqueIdentifier
+                || info?.title != before.title
+                || (info?.elapsedTime ?? 0) < before.currentElapsedTime - 1
+            if changed {
+                endTrackChange()
+            }
+        }
+        
+        nowPlaying = info
+        lastError = nil
+    }
+    
     // MARK: - Private Methods
     
-    /// Read and parse output from the adapter
+    /// Read and parse output from the adapter until the process exits
     nonisolated private func readOutput(from pipe: Pipe) async {
         let fileHandle = pipe.fileHandleForReading
         
@@ -217,17 +276,15 @@ class MediaRemoteAdapter: ObservableObject {
         var buffer = Data()
         
         while true {
-            // Check if we should stop
-            let shouldContinue = await MainActor.run { self.isRunning }
-            guard shouldContinue else { break }
-            
-            // Read available data
+            // Blocks until data arrives; empty means the process ended (or was stopped)
             let data = fileHandle.availableData
             
             if data.isEmpty {
-                // Process ended
                 await MainActor.run {
-                    self.isRunning = false
+                    // Ignore if a newer stream has replaced this one
+                    if self.outputPipe === pipe {
+                        self.isRunning = false
+                    }
                 }
                 break
             }
@@ -251,10 +308,6 @@ class MediaRemoteAdapter: ObservableObject {
     nonisolated private func parseLine(_ data: Data) async {
         guard !data.isEmpty else { return }
         
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print("📄 Raw JSON: \(jsonString)")
-        }
-        
         // Try to decode as NowPlayingInfo
         let decoder = JSONDecoder()
         
@@ -264,8 +317,7 @@ class MediaRemoteAdapter: ObservableObject {
             
             // Update on main thread
             await MainActor.run {
-                self.nowPlaying = info
-                self.lastError = nil
+                self.update(info)
             }
             
             print("🎵 Updated: \(info.title ?? "Uknown") - \(info.artist ?? "Unknown")")
@@ -275,13 +327,13 @@ class MediaRemoteAdapter: ObservableObject {
                 if jsonString.trimmingCharacters(in: .whitespacesAndNewlines) == "null" {
                     // Nothing playing
                     await MainActor.run {
-                        self.nowPlaying = nil
-                        self.lastError = nil
+                        self.update(nil)
                     }
                     print("⏸️ Nothing playing")
                 } else {
+                    // Don't print the whole line: it can hold hundreds of KB of artwork
                     print("⚠️ Failed to decode JSON: \(error)")
-                    print("📄 Raw: \(jsonString)")
+                    print("📄 Raw: \(jsonString.prefix(500))")
                 }
             }
         }
