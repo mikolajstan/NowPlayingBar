@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- App icon.
+
 ## 1.1 - 2026-10-25
 
 ### Menu bar
