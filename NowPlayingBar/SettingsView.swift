@@ -105,6 +105,9 @@ private struct PopoverSettings: View {
             Section("Colors") {
                 ColorPicker("Button background", selection: $settings.buttonBackgroundColor)
                 ColorPicker("Button background on hover", selection: $settings.buttonHoverColor)
+                Toggle("Custom button icon color", isOn: $settings.buttonIconColorEnabled)
+                ColorPicker("Button icon color", selection: $settings.buttonIconColor)
+                    .disabled(!settings.buttonIconColorEnabled)
                 ColorPicker("Seek bar", selection: $settings.seekBarColor)
             }
 

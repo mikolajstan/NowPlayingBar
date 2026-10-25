@@ -530,11 +530,16 @@ struct CircleButtonStyle: ButtonStyle {
         /// Black or white, whichever reads better on the circle's color over the popover
         /// (an almost opaque dark circle keeps white icons even when the popover turns light)
         private var iconColor: Color {
+            if settings.buttonIconColorEnabled {
+                return settings.buttonIconColor
+            }
             let circle = fill.resolve(in: environment)
             let backdrop: Float = environment.colorScheme == .dark ? 0.02 : 0.8
             // Linear sRGB luminance of the circle blended over the popover
             let luminance = 0.2126 * circle.linearRed + 0.7152 * circle.linearGreen + 0.0722 * circle.linearBlue
-            let blended = circle.opacity * luminance + (1 - circle.opacity) * backdrop
+            // A mostly opaque circle decides on its own; a faint one mostly shows the popover
+            let coverage = circle.opacity >= 0.5 ? 1 : circle.opacity
+            let blended = coverage * luminance + (1 - coverage) * backdrop
             return blended > 0.2 ? .black : .white
         }
 

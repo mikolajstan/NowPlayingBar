@@ -78,6 +78,10 @@ final class AppSettings: ObservableObject {
     /// Circle behind the playback buttons, and its color on hover
     @Published var buttonBackgroundColor: Color { didSet { save(buttonBackgroundColor, .buttonBackgroundColor) } }
     @Published var buttonHoverColor: Color { didSet { save(buttonHoverColor, .buttonHoverColor) } }
+    
+    /// Use `buttonIconColor` for the playback icons instead of picking black or white automatically
+    @Published var buttonIconColorEnabled: Bool { didSet { save(buttonIconColorEnabled, .buttonIconColorEnabled) } }
+    @Published var buttonIconColor: Color { didSet { save(buttonIconColor, .buttonIconColor) } }
 
     /// What the source label at the top of the popover shows
     @Published var sourceLabelStyle: SourceLabelStyle { didSet { save(sourceLabelStyle.rawValue, .sourceLabelStyle) } }
@@ -136,6 +140,8 @@ final class AppSettings: ObservableObject {
         popoverBackgroundOpacity = defaults.object(forKey: Key.popoverBackgroundOpacity.rawValue) as? Double ?? 0.6
         buttonBackgroundColor = Self.color(defaults, .buttonBackgroundColor) ?? Color.primary.opacity(0.08)
         buttonHoverColor = Self.color(defaults, .buttonHoverColor) ?? Color.primary.opacity(0.18)
+        buttonIconColorEnabled = defaults.object(forKey: Key.buttonIconColorEnabled.rawValue) as? Bool ?? false
+        buttonIconColor = Self.color(defaults, .buttonIconColor) ?? .white
         seekBarColor = Self.color(defaults, .seekBarColor) ?? .accentColor
         sourceLabelStyle = defaults.string(forKey: Key.sourceLabelStyle.rawValue)
             .flatMap(SourceLabelStyle.init(rawValue:)) ?? .iconAndName
@@ -178,6 +184,8 @@ final class AppSettings: ObservableObject {
         popoverBackgroundOpacity = fresh.popoverBackgroundOpacity
         buttonBackgroundColor = fresh.buttonBackgroundColor
         buttonHoverColor = fresh.buttonHoverColor
+        buttonIconColorEnabled = fresh.buttonIconColorEnabled
+        buttonIconColor = fresh.buttonIconColor
         seekBarColor = fresh.seekBarColor
         sourceLabelStyle = fresh.sourceLabelStyle
 
@@ -198,6 +206,7 @@ final class AppSettings: ObservableObject {
         case buttonBackgroundColor, buttonHoverColor, seekBarColor
         case menuBarTextColorEnabled, menuBarTextColor, sourceLabelStyle
         case menuBarHorizontalPadding, menuBarBackgroundInset, popoverStaysOpen
+        case buttonIconColorEnabled, buttonIconColor
         case sourceFilterEnabled, allowedDomains, allowedApps, browserTabLookupEnabled
         
         /// Everything except the source settings
