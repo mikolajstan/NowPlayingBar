@@ -26,7 +26,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var settingsWindow: NSWindow?
 
+    /// Posted by a second launch, to the instance that's already running
+    private static let showPopoverNotification = Notification.Name("NowPlayingBar.showPopover")
+    private static let quitNotification = Notification.Name("NowPlayingBar.quit")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard handOffToRunningInstance() == false else { return }
+
         // Start streaming at launch so the menu bar title shows without opening the popover
         adapter.start()
 
@@ -35,6 +41,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings: settings,
             openSettings: { [weak self] panelFrame in self?.showSettings(nextTo: panelFrame) }
         )
+    }
+
+    // MARK: - Single Instance
+
+    /// Only one copy should run (e.g. an exported app plus one in /Applications, or the same app opened twice).
+    /// A release build that finds one already running opens that one's popover and quits itself;
+    /// a debug build (run from Xcode) quits the running one instead and carries on.
+    /// Returns true when this instance is quitting.
+    private func handOffToRunningInstance() -> Bool {
+        let center = DistributedNotificationCenter.default()
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0 != NSRunningApplication.current }
+
+        if !others.isEmpty {
+            #if DEBUG
+            center.postNotificationName(Self.quitNotification, object: bundleID, deliverImmediately: true)
+            #else
+            center.postNotificationName(Self.showPopoverNotification, object: bundleID, deliverImmediately: true)
+            NSApp.terminate(nil)
+            return true
+            #endif
+        }
+
+        center.addObserver(forName: Self.showPopoverNotification, object: bundleID, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.statusItemController?.showPanel()
+            }
+        }
+        center.addObserver(forName: Self.quitNotification, object: bundleID, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                NSApp.terminate(nil)
+            }
+        }
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {

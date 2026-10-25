@@ -101,7 +101,7 @@ final class StatusItemController: NSObject {
         }
     }
 
-    private func showPanel() {
+    func showPanel() {
         // A non-activating panel becomes key without activating the app, which macOS may refuse
         // for an app without a Dock icon; key is what gives controls their active look
         if let content = panel.contentView {
