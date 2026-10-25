@@ -22,8 +22,11 @@ class MediaRemoteAdapter: ObservableObject {
     
     // MARK: - Published Properties
     
-    /// The current now playing information (nil if nothing is playing)
+    /// The current now playing information (nil if nothing is playing, or the source is filtered out)
     @Published var nowPlaying: NowPlayingInfo?
+    
+    /// The latest info from the stream, before filtering
+    @Published private(set) var unfilteredNowPlaying: NowPlayingInfo?
     
     /// Whether the adapter is currently running
     @Published var isRunning: Bool = false
@@ -31,8 +34,14 @@ class MediaRemoteAdapter: ObservableObject {
     /// Last error message, if any
     @Published var lastError: String?
     
+    /// Domain the current source plays from (web app or browser tab), when known
+    @Published var sourceDomain: String?
+    
     /// Decoded artwork for `nowPlaying`, only re-decoded when the artwork data changes
     @Published var artwork: NSImage?
+    
+    /// Average perceived brightness of `artwork`, 0 (black) to 1 (white)
+    @Published var artworkLuminance: Double?
     
     /// True from a next/previous click until the stream reports the change
     /// (or a short timeout passes), so the UI can react before the round trip
@@ -59,6 +68,10 @@ class MediaRemoteAdapter: ObservableObject {
     private var trackBeforeChange: NowPlayingInfo?
     private var trackChangeTimeout: Task<Void, Never>?
     
+    /// Decides which sources are shown
+    private let sourceFilter: SourceFilter
+    private var settingsObserver: AnyCancellable?
+    
     // MARK: - Initialization
     
     /// Initialize with paths to the adapter script and framework
@@ -66,10 +79,21 @@ class MediaRemoteAdapter: ObservableObject {
     ///   - scriptPath: Path to mediaremote-adapter.pl
     ///   - frameworkPath: Path to MediaRemoteAdapter.framework
     ///   - testClientPath: Path to MediaRemoteAdapterTestClient
-    init(scriptPath: String, frameworkPath: String, testClientPath: String) {
+    ///   - settings: Settings with the allowed sources
+    init(scriptPath: String, frameworkPath: String, testClientPath: String, settings: AppSettings) {
         self.scriptPath = scriptPath
         self.frameworkPath = frameworkPath
         self.testClientPath = testClientPath
+        self.sourceFilter = SourceFilter(settings: settings)
+        
+        sourceFilter.onLookupFinished = { [weak self] in
+            self?.applyFilter()
+        }
+        
+        // Re-filter when the allowed sources change (objectWillChange fires before the new value is set)
+        settingsObserver = settings.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in self?.applyFilter() }
     }
     
     /// Convenience initializer using the copy bundled inside the app
@@ -81,7 +105,8 @@ class MediaRemoteAdapter: ObservableObject {
             scriptPath: bundle.url(forResource: "mediaremote-adapter", withExtension: "pl")?.path ?? "",
             frameworkPath: bundle.privateFrameworksURL?
                 .appendingPathComponent("MediaRemoteAdapter.framework").path ?? "",
-            testClientPath: bundle.url(forAuxiliaryExecutable: "MediaRemoteAdapterTestClient")?.path ?? ""
+            testClientPath: bundle.url(forAuxiliaryExecutable: "MediaRemoteAdapterTestClient")?.path ?? "",
+            settings: .shared
         )
     }
     
@@ -222,11 +247,17 @@ class MediaRemoteAdapter: ObservableObject {
         }
     }
     
+    /// Bring the playing app forward (for a browser, the tab that's playing)
+    func revealSource() {
+        guard let info = nowPlaying else { return }
+        sourceFilter.reveal(info)
+    }
+    
     // MARK: - Track Change Feedback
     
     /// Remember the current track and show the "changing" state until it changes
     private func beginTrackChange() {
-        trackBeforeChange = nowPlaying
+        trackBeforeChange = unfilteredNowPlaying
         isChangingTrack = true
         
         trackChangeTimeout?.cancel()
@@ -246,12 +277,6 @@ class MediaRemoteAdapter: ObservableObject {
     
     /// Apply a stream update on the main actor
     private func update(_ info: NowPlayingInfo?) {
-        if info?.artworkData != nowPlaying?.artworkData || (artwork == nil && info?.artworkData != nil) {
-            artwork = info?.artworkData
-                .flatMap { Data(base64Encoded: $0) }
-                .flatMap { NSImage(data: $0) }
-        }
-        
         if isChangingTrack, let before = trackBeforeChange {
             // A new track, or "previous" restarting the same one
             let changed = info?.uniqueIdentifier != before.uniqueIdentifier
@@ -262,8 +287,27 @@ class MediaRemoteAdapter: ObservableObject {
             }
         }
         
-        nowPlaying = info
+        unfilteredNowPlaying = info
         lastError = nil
+        applyFilter()
+    }
+    
+    /// Show the latest info only if its source is allowed
+    private func applyFilter() {
+        let info = unfilteredNowPlaying
+        let visible = info.flatMap { sourceFilter.decide($0) == .allowed ? $0 : nil }
+        
+        if visible?.artworkData != nowPlaying?.artworkData || (artwork == nil && visible?.artworkData != nil) {
+            artwork = visible?.artworkData
+                .flatMap { Data(base64Encoded: $0) }
+                .flatMap { NSImage(data: $0) }
+            artworkLuminance = artwork?.averageLuminance
+        }
+        
+        sourceDomain = info.flatMap { sourceFilter.domain(for: $0) }
+        if nowPlaying != visible {
+            nowPlaying = visible
+        }
     }
     
     // MARK: - Private Methods
@@ -343,5 +387,32 @@ class MediaRemoteAdapter: ObservableObject {
     
     deinit {
         process?.terminate()
+    }
+}
+
+// MARK: - Artwork Brightness
+
+extension NSImage {
+    /// Average perceived brightness, from the image scaled down to 8×8 pixels
+    var averageLuminance: Double? {
+        let size = 8
+        guard let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = CGContext(
+                data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        
+        context.interpolationQuality = .medium
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: size, height: size))
+        guard let data = context.data else { return nil }
+        
+        let pixels = data.bindMemory(to: UInt8.self, capacity: size * size * 4)
+        var total = 0.0
+        for i in 0..<(size * size) {
+            let r = Double(pixels[i * 4]), g = Double(pixels[i * 4 + 1]), b = Double(pixels[i * 4 + 2])
+            total += (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        }
+        return total / Double(size * size)
     }
 }

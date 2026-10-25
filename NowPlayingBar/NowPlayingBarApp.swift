@@ -9,88 +9,113 @@ import SwiftUI
 
 @main
 struct NowPlayingBarApp: App {
-    @StateObject private var adapter: MediaRemoteAdapter
-    @State private var scrollOffset: Int = 0
-    @State private var scrollTimer: Timer?
-
-    init() {
-        // Start streaming at launch so the menu bar title shows without opening the popover
-        let adapter = MediaRemoteAdapter()
-        adapter.start()
-        _adapter = StateObject(wrappedValue: adapter)
-    }
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            ContentView()
+        // The menu bar item and popover are AppKit (see StatusItemController);
+        // the app still needs one scene
+        Settings {
+            EmptyView()
+        }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let adapter = MediaRemoteAdapter()
+    private let settings = AppSettings.shared
+    private var statusItemController: StatusItemController?
+    private var settingsWindow: NSWindow?
+
+    /// Posted by a second launch, to the instance that's already running
+    private static let showPopoverNotification = Notification.Name("NowPlayingBar.showPopover")
+    private static let quitNotification = Notification.Name("NowPlayingBar.quit")
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard handOffToRunningInstance() == false else { return }
+
+        // Start streaming at launch so the menu bar title shows without opening the popover
+        adapter.start()
+
+        statusItemController = StatusItemController(
+            adapter: adapter,
+            settings: settings,
+            openSettings: { [weak self] panelFrame in self?.showSettings(nextTo: panelFrame) }
+        )
+    }
+
+    // MARK: - Single Instance
+
+    /// Only one copy should run (e.g. an exported app plus one in /Applications, or the same app opened twice).
+    /// A release build that finds one already running opens that one's popover and quits itself;
+    /// a debug build (run from Xcode) quits the running one instead and carries on.
+    /// Returns true when this instance is quitting.
+    private func handOffToRunningInstance() -> Bool {
+        let center = DistributedNotificationCenter.default()
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0 != NSRunningApplication.current }
+
+        if !others.isEmpty {
+            #if DEBUG
+            center.postNotificationName(Self.quitNotification, object: bundleID, deliverImmediately: true)
+            #else
+            center.postNotificationName(Self.showPopoverNotification, object: bundleID, deliverImmediately: true)
+            NSApp.terminate(nil)
+            return true
+            #endif
+        }
+
+        center.addObserver(forName: Self.showPopoverNotification, object: bundleID, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.statusItemController?.showPanel()
+            }
+        }
+        center.addObserver(forName: Self.quitNotification, object: bundleID, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                NSApp.terminate(nil)
+            }
+        }
+        return false
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        adapter.stop()
+    }
+
+    // MARK: - Settings Window
+
+    /// Opens the settings window to the left of the popover so both stay visible
+    private func showSettings(nextTo panelFrame: NSRect) {
+        if settingsWindow == nil {
+            let view = SettingsView()
                 .environmentObject(adapter)
-        } label: {
-            if let info = adapter.nowPlaying {
-                Text(scrollingText(info))
-                    .monospacedDigit() // Helps with smoother scrolling
-                    .onChange(of: info.title) { oldValue, newValue in
-                        // Reset scroll when song changes
-                        scrollOffset = 0
-                    }
-            } else {
-                Image(systemName: "music.note")
+                .environmentObject(settings)
+
+            let window = SettingsWindow(contentViewController: NSHostingController(rootView: view))
+            window.title = "NowPlayingBar Settings"
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.isReleasedWhenClosed = false
+            settingsWindow = window
+        }
+
+        if let window = settingsWindow, !window.isVisible {
+            // Size it from its content first: on first open the window doesn't have its final size yet,
+            // which placed it under the popover
+            if let content = window.contentViewController?.view {
+                window.setContentSize(content.fittingSize)
             }
-        }
-        .menuBarExtraStyle(.window)
-        .onChange(of: adapter.nowPlaying) { oldValue, newValue in
-            // Start or stop scrolling based on whether something is playing
-            if newValue != nil {
-                startScrolling()
-            } else {
-                stopScrolling()
+            let size = window.frame.size
+            var origin = NSPoint(x: panelFrame.minX - 12 - size.width, y: panelFrame.maxY - size.height)
+            if let visible = (NSScreen.screens.first { $0.frame.intersects(panelFrame) } ?? NSScreen.main)?.visibleFrame {
+                origin.x = max(origin.x, visible.minX + 8)
+                origin.y = max(origin.y, visible.minY + 8)
             }
+            window.setFrameOrigin(origin)
         }
-    }
-    
-    // MARK: - Scrolling Logic
-    
-    private func scrollingText(_ info: NowPlayingInfo) -> String {
-        let title = info.title ?? "Unknown"
-        let artist = info.artist ?? "Unknown"
-        let combined = "\(title) - \(artist)"
-        
-        let maxLength = 40 // Maximum characters to show at once
-        
-        // If the text is short enough, just return it
-        if combined.count <= maxLength {
-            return combined
-        }
-        
-        // Add separator and padding for seamless loop
-        let separator = "   •   "
-        let padded = combined + separator
-        
-        // Create a seamless loop by repeating the text
-        let loopText = padded + padded
-        
-        // Calculate the visible window
-        let startOffset = scrollOffset % padded.count
-        let startIndex = loopText.index(loopText.startIndex, offsetBy: startOffset)
-        
-        // Make sure we don't go past the end
-        let maxEndOffset = min(startOffset + maxLength, loopText.count)
-        let endIndex = loopText.index(loopText.startIndex, offsetBy: maxEndOffset)
-        
-        return String(loopText[startIndex..<endIndex])
-    }
-    
-    private func startScrolling() {
-        // Don't start multiple timers
-        guard scrollTimer == nil else { return }
-        
-        scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { _ in
-            scrollOffset += 1
-        }
-    }
-    
-    private func stopScrolling() {
-        scrollTimer?.invalidate()
-        scrollTimer = nil
-        scrollOffset = 0
+
+        NSApp.activate()
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        // In case macOS doesn't let the app activate
+        settingsWindow?.orderFrontRegardless()
     }
 }
