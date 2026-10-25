@@ -21,7 +21,8 @@ final class StatusItemController: NSObject {
     /// Set when clicking outside closes the panel, so a click on the item itself doesn't reopen it
     private var lastAutoClose = Date.distantPast
 
-    init(adapter: MediaRemoteAdapter, settings: AppSettings, openSettings: @escaping () -> Void) {
+    /// - Parameter openSettings: Opens the settings window next to the given panel frame
+    init(adapter: MediaRemoteAdapter, settings: AppSettings, openSettings: @escaping (NSRect) -> Void) {
         self.adapter = adapter
         self.settings = settings
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -53,8 +54,9 @@ final class StatusItemController: NSObject {
         // Popover
         let content = ContentView(
             openSettings: { [weak self] in
-                self?.closePanel()
-                openSettings()
+                // The popover stays open so changes can be seen while adjusting them
+                guard let self else { return }
+                openSettings(self.panel.frame)
             }
         )
         .environmentObject(adapter)
@@ -69,6 +71,18 @@ final class StatusItemController: NSObject {
         NotificationCenter.default.addObserver(
             self, selector: #selector(panelDidResize),
             name: NSWindow.didResizeNotification, object: panel
+        )
+
+        // When the settings window closes, give focus back to the popover so clicking outside closes it again
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(otherWindowWillClose(_:)),
+            name: NSWindow.willCloseNotification, object: nil
+        )
+
+        // Clicking another app closes the popover even when the settings window had focus
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appDidResignActive),
+            name: NSApplication.didResignActiveNotification, object: nil
         )
     }
 
@@ -95,6 +109,19 @@ final class StatusItemController: NSObject {
     private func closePanel() {
         panel.orderOut(nil)
         statusItem.button?.highlight(false)
+    }
+
+    @objc private func otherWindowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window !== panel, panel.isVisible else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.panel.makeKey()
+        }
+    }
+
+    @objc private func appDidResignActive() {
+        guard panel.isVisible else { return }
+        closePanel()
+        lastAutoClose = Date()
     }
 
     /// Keep the top-right corner pinned when the content changes size
@@ -151,9 +178,14 @@ final class PopoverPanel: NSPanel {
 
     override func resignKey() {
         super.resignKey()
-        guard isVisible else { return }
-        orderOut(nil)
-        onAutoClose?()
+        // Checked on the next run loop pass, once the new key window is known
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isVisible, !self.isKeyWindow else { return }
+            // Stay open while another of the app's windows (Settings) has focus
+            if let key = NSApp.keyWindow, key.styleMask.contains(.titled) { return }
+            self.orderOut(nil)
+            self.onAutoClose?()
+        }
     }
 
     override func cancelOperation(_ sender: Any?) {
