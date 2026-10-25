@@ -180,6 +180,18 @@ struct ContentView: View {
         }
         .padding()
         .frame(minWidth: 250)
+        .overlay(alignment: .topTrailing) {
+            // Quit button (also ⌘Q while the popover is open)
+            Button(action: quit) {
+                Image(systemName: "power")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(PressableButtonStyle())
+            .keyboardShortcut("q", modifiers: .command)
+            .help("Quit NowPlayingBar")
+            .padding(8)
+        }
         .onAppear {
             // Start the adapter when the view appears
             adapter.start()
@@ -225,6 +237,14 @@ struct ContentView: View {
     private func seekToPosition(_ position: Double) {
         adapter.seek(to: position)
         currentElapsedTime = position
+    }
+    
+    // MARK: - App
+    
+    /// Stop the adapter's Perl process so it doesn't outlive the app, then quit
+    private func quit() {
+        adapter.stop()
+        NSApplication.shared.terminate(nil)
     }
     
     // MARK: - Helper Methods
