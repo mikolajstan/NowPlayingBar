@@ -78,6 +78,11 @@ struct NowPlayingInfo: Codable, Equatable {
         return sourceApp.contains("Safari.WebApp")
     }
     
+    /// Title, artist and album with HTML entities decoded (web players send e.g. "&amp;")
+    var displayTitle: String? { title.map(Self.decodeEntities) }
+    var displayArtist: String? { artist.map(Self.decodeEntities) }
+    var displayAlbum: String? { album.map(Self.decodeEntities) }
+    
     /// Elapsed time right now. The adapter reports `elapsedTime` as of `timestamp`,
     /// so while playing we add the time that has passed since then.
     var currentElapsedTime: Double {
@@ -120,6 +125,20 @@ struct NowPlayingInfo: Codable, Equatable {
     
     /// Parses the adapter's timestamp format (e.g., "2026-10-24T13:04:20Z")
     private static let timestampFormatter = ISO8601DateFormatter()
+    
+    /// `&amp;` last, so "&amp;lt;" becomes "&lt;" and not "<"
+    nonisolated private static let entities = [
+        ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "), ("&amp;", "&"),
+    ]
+    
+    nonisolated private static func decodeEntities(_ text: String) -> String {
+        guard text.contains("&") else { return text }
+        var result = text
+        for (entity, character) in entities {
+            result = result.replacingOccurrences(of: entity, with: character)
+        }
+        return result
+    }
     
     private func formatTime(_ seconds: Double) -> String {
         let totalSeconds = Int(seconds)
