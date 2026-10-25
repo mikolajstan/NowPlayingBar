@@ -58,6 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let window = settingsWindow, !window.isVisible {
+            // Size it from its content first: on first open the window doesn't have its final size yet,
+            // which placed it under the popover
+            if let content = window.contentViewController?.view {
+                window.setContentSize(content.fittingSize)
+            }
             let size = window.frame.size
             var origin = NSPoint(x: panelFrame.minX - 12 - size.width, y: panelFrame.maxY - size.height)
             if let visible = (NSScreen.screens.first { $0.frame.intersects(panelFrame) } ?? NSScreen.main)?.visibleFrame {
