@@ -19,7 +19,7 @@ struct MenuBarLabel: View {
     static let artworkSize: CGFloat = 16
     static let spacing: CGFloat = 5
     static let horizontalPadding: CGFloat = 6
-    static let font = Font(NSFont.menuBarFont(ofSize: 0))
+    static let font = NSFont.menuBarFont(ofSize: 0)
 
     var body: some View {
         Group {
@@ -49,14 +49,14 @@ struct MenuBarLabel: View {
             MarqueeText(
                 text: text(for: info),
                 font: Self.font,
+                color: textColor(isPaused: isPaused),
                 speed: settings.menuBarScrollSpeed,
                 isScrolling: !isPaused,
                 textWidth: $textWidth
             )
-            .foregroundStyle(isPaused && settings.menuBarPausedTintEnabled
-                             ? AnyShapeStyle(settings.menuBarPausedColor)
-                             : AnyShapeStyle(.primary))
         }
+        // Only the content dims while paused, so the background keeps its own opacity
+        .opacity(isPaused ? settings.menuBarPausedOpacity : 1)
         .padding(.horizontal, Self.horizontalPadding)
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity)
@@ -67,11 +67,21 @@ struct MenuBarLabel: View {
                     .padding(.vertical, 2)
             }
         }
-        .opacity(isPaused ? settings.menuBarPausedOpacity : 1)
         .animation(.easeInOut(duration: 0.25), value: isPaused)
         .onChange(of: width, initial: true) { _, newValue in
             onWidthChange(newValue)
         }
+    }
+
+    /// Paused color, custom color, or nil for the menu bar's own text color
+    private func textColor(isPaused: Bool) -> NSColor? {
+        if isPaused && settings.menuBarPausedTintEnabled {
+            return NSColor(settings.menuBarPausedColor)
+        }
+        if settings.menuBarTextColorEnabled {
+            return NSColor(settings.menuBarTextColor)
+        }
+        return nil
     }
 
     private var artwork: some View {
@@ -112,87 +122,154 @@ struct MenuBarLabel: View {
 
 // MARK: - Marquee
 
-/// Single-line text that scrolls pixel by pixel when it doesn't fit, pausing at the start of each loop
-struct MarqueeText: View {
+/// Single-line text that scrolls when it doesn't fit, pausing at the start of each loop.
+///
+/// The scrolling is a Core Animation animation on a layer, so it runs in the render server at
+/// sub-pixel precision and stays smooth at any speed (redrawing from SwiftUI every frame moved
+/// the text in uneven whole-pixel steps).
+struct MarqueeText: NSViewRepresentable {
     let text: String
-    let font: Font
+    let font: NSFont
+    /// nil uses the menu bar's text color
+    let color: NSColor?
     /// Points per second
     let speed: Double
     let isScrolling: Bool
+    /// Width of the full text on one line
     @Binding var textWidth: CGFloat
+
+    func makeNSView(context: Context) -> MarqueeView {
+        MarqueeView()
+    }
+
+    func updateNSView(_ view: MarqueeView, context: Context) {
+        view.configure(text: text, font: font, color: color, speed: speed, isScrolling: isScrolling)
+
+        let width = view.textWidth
+        if width != textWidth {
+            DispatchQueue.main.async { textWidth = width }
+        }
+    }
+}
+
+final class MarqueeView: NSView {
+    /// Holds the text and its repeat; this is what moves
+    private let strip = NSView()
+    private let first = NSTextField(labelWithString: "")
+    private let second = NSTextField(labelWithString: "")
+    private let fadeMask = CAGradientLayer()
+
+    private(set) var textWidth: CGFloat = 0
+    private var speed: Double = 0
+    private var isScrolling = false
+    /// What the running animation was made for, so it only restarts when something changed
+    private var animationKey = ""
 
     /// Gap between the end of the text and its repeat
     private let gap: CGFloat = 32
     /// Rest at the start of each loop, in seconds
     private let pause: Double = 2
-    /// Width of the faded edges while scrolling
+    /// Width of the faded edges
     private let fade: CGFloat = 8
 
-    /// When the current loop started, so pausing and title changes restart from the beginning
-    @State private var start = Date()
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
 
-    var body: some View {
-        GeometryReader { geometry in
-            let overflows = textWidth > geometry.size.width + 0.5
-
-            Group {
-                if overflows && isScrolling && speed > 0 {
-                    TimelineView(.animation(minimumInterval: 1 / 60)) { context in
-                        HStack(spacing: gap) {
-                            label
-                            label
-                        }
-                        .offset(x: -offset(at: context.date))
-                    }
-                    .mask(fadeMask)
-                } else {
-                    label
-                        .frame(width: geometry.size.width, alignment: .leading)
-                        .mask(overflows ? AnyView(trailingFadeMask) : AnyView(Color.black))
-                }
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
-            .clipped()
+        strip.wantsLayer = true
+        addSubview(strip)
+        for label in [first, second] {
+            label.lineBreakMode = .byClipping
+            label.maximumNumberOfLines = 1
+            strip.addSubview(label)
         }
-        .background(alignment: .leading) {
-            // Measures the text without limiting it to the visible width
-            label
-                .hidden()
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
-        }
-        .onChange(of: text) { start = Date() }
-        .onChange(of: isScrolling) { start = Date() }
     }
 
-    private var label: some View {
-        Text(text)
-            .font(font)
-            .lineLimit(1)
-            .fixedSize()
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
-    private func offset(at date: Date) -> CGFloat {
+    /// Clicks go to the status bar button
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func configure(text: String, font: NSFont, color: NSColor?, speed: Double, isScrolling: Bool) {
+        for label in [first, second] {
+            label.stringValue = text
+            label.font = font
+            label.textColor = color ?? .labelColor
+        }
+        textWidth = ceil(first.fittingSize.width)
+        self.speed = speed
+        self.isScrolling = isScrolling
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+
+        let height = first.fittingSize.height
+        let y = ((bounds.height - height) / 2).rounded()
+        first.frame = NSRect(x: 0, y: y, width: textWidth, height: height)
+        second.frame = NSRect(x: textWidth + gap, y: y, width: textWidth, height: height)
+        strip.frame = NSRect(x: 0, y: 0, width: textWidth * 2 + gap, height: bounds.height)
+
+        let overflows = textWidth > bounds.width + 0.5
+        let scrolls = overflows && isScrolling && speed > 0
+        second.isHidden = !scrolls
+        updateMask(overflows: overflows, scrolls: scrolls)
+        updateAnimation(scrolls: scrolls)
+    }
+
+    /// Fade both edges while scrolling, only the trailing edge when the text is cut off
+    private func updateMask(overflows: Bool, scrolls: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
+        guard overflows, bounds.width > fade * 2 else {
+            layer?.mask = nil
+            return
+        }
+        let edge = NSNumber(value: Double(fade / bounds.width))
+        let end = NSNumber(value: 1 - Double(fade / bounds.width))
+        fadeMask.frame = bounds
+        fadeMask.startPoint = CGPoint(x: 0, y: 0.5)
+        fadeMask.endPoint = CGPoint(x: 1, y: 0.5)
+        if scrolls {
+            fadeMask.colors = [NSColor.clear.cgColor, NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+            fadeMask.locations = [0, edge, end, 1]
+        } else {
+            fadeMask.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+            fadeMask.locations = [0, end, 1]
+        }
+        layer?.mask = fadeMask
+    }
+
+    private func updateAnimation(scrolls: Bool) {
+        let key = scrolls ? "\(first.stringValue)|\(textWidth)|\(speed)" : ""
+        guard key != animationKey || (scrolls && strip.layer?.animation(forKey: "marquee") == nil) else { return }
+        animationKey = key
+
+        strip.layer?.removeAnimation(forKey: "marquee")
+        guard scrolls else { return }
+
         let distance = textWidth + gap
-        let cycle = pause + distance / speed
-        let t = date.timeIntervalSince(start).truncatingRemainder(dividingBy: cycle)
-        return max(0, t - pause) * speed
-    }
+        let travel = Double(distance) / speed
 
-    private var fadeMask: some View {
-        HStack(spacing: 0) {
-            LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
-                .frame(width: fade)
-            Color.black
-            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(width: fade)
-        }
-    }
+        // Rest for `pause`, then move one text width + gap, at which point the repeat sits
+        // exactly where the text started, so the loop is seamless
+        let move = CABasicAnimation(keyPath: "transform.translation.x")
+        move.fromValue = 0
+        move.toValue = -distance
+        move.beginTime = pause
+        move.duration = travel
 
-    private var trailingFadeMask: some View {
-        HStack(spacing: 0) {
-            Color.black
-            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(width: fade)
-        }
+        let loop = CAAnimationGroup()
+        loop.animations = [move]
+        loop.duration = pause + travel
+        loop.repeatCount = .infinity
+        loop.isRemovedOnCompletion = false
+        strip.layer?.add(loop, forKey: "marquee")
     }
 }

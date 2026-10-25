@@ -40,6 +40,9 @@ class MediaRemoteAdapter: ObservableObject {
     /// Decoded artwork for `nowPlaying`, only re-decoded when the artwork data changes
     @Published var artwork: NSImage?
     
+    /// Average perceived brightness of `artwork`, 0 (black) to 1 (white)
+    @Published var artworkLuminance: Double?
+    
     /// True from a next/previous click until the stream reports the change
     /// (or a short timeout passes), so the UI can react before the round trip
     @Published var isChangingTrack: Bool = false
@@ -244,6 +247,12 @@ class MediaRemoteAdapter: ObservableObject {
         }
     }
     
+    /// Bring the playing app forward (for a browser, the tab that's playing)
+    func revealSource() {
+        guard let info = nowPlaying else { return }
+        sourceFilter.reveal(info)
+    }
+    
     // MARK: - Track Change Feedback
     
     /// Remember the current track and show the "changing" state until it changes
@@ -292,6 +301,7 @@ class MediaRemoteAdapter: ObservableObject {
             artwork = visible?.artworkData
                 .flatMap { Data(base64Encoded: $0) }
                 .flatMap { NSImage(data: $0) }
+            artworkLuminance = artwork?.averageLuminance
         }
         
         sourceDomain = info.flatMap { sourceFilter.domain(for: $0) }
@@ -377,5 +387,32 @@ class MediaRemoteAdapter: ObservableObject {
     
     deinit {
         process?.terminate()
+    }
+}
+
+// MARK: - Artwork Brightness
+
+extension NSImage {
+    /// Average perceived brightness, from the image scaled down to 8×8 pixels
+    var averageLuminance: Double? {
+        let size = 8
+        guard let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = CGContext(
+                data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        
+        context.interpolationQuality = .medium
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: size, height: size))
+        guard let data = context.data else { return nil }
+        
+        let pixels = data.bindMemory(to: UInt8.self, capacity: size * size * 4)
+        var total = 0.0
+        for i in 0..<(size * size) {
+            let r = Double(pixels[i * 4]), g = Double(pixels[i * 4 + 1]), b = Double(pixels[i * 4 + 2])
+            total += (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        }
+        return total / Double(size * size)
     }
 }

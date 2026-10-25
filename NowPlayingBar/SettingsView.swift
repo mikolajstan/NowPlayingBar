@@ -37,6 +37,9 @@ private struct MenuBarSettings: View {
                 Toggle("Shrink to fit short titles", isOn: $settings.menuBarShrinkToFit)
                 Toggle("Show artwork before the title", isOn: $settings.menuBarShowArtwork)
                 Toggle("Show artist", isOn: $settings.menuBarShowArtist)
+                Toggle("Custom text color", isOn: $settings.menuBarTextColorEnabled)
+                ColorPicker("Text color", selection: $settings.menuBarTextColor)
+                    .disabled(!settings.menuBarTextColorEnabled)
                 LabeledSlider("Scroll speed", value: $settings.menuBarScrollSpeed, in: 0...100, step: 5, unit: "pt/s")
             }
 
@@ -49,7 +52,7 @@ private struct MenuBarSettings: View {
             }
 
             Section("When paused") {
-                LabeledSlider("Opacity", value: $settings.menuBarPausedOpacity, in: 0.1...1, step: 0.05, percent: true)
+                LabeledSlider("Artwork and text opacity", value: $settings.menuBarPausedOpacity, in: 0.1...1, step: 0.05, percent: true)
                 Toggle("Use a different text color", isOn: $settings.menuBarPausedTintEnabled)
                 ColorPicker("Text color", selection: $settings.menuBarPausedColor)
                     .disabled(!settings.menuBarPausedTintEnabled)
@@ -77,6 +80,11 @@ private struct PopoverSettings: View {
                 }
                 .pickerStyle(.segmented)
                 Toggle("Show album", isOn: $settings.popoverShowAlbum)
+                Picker("Source label", selection: $settings.sourceLabelStyle) {
+                    ForEach(SourceLabelStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
             }
 
             Section("Background") {
@@ -272,9 +280,23 @@ struct QuickSettingsView: View {
                 Button("All Settings…", action: openSettings)
             }
         }
-        .toggleStyle(.switch)
+        .toggleStyle(QuickToggleStyle())
         .controlSize(.small)
         .font(.caption)
+    }
+}
+
+/// Label on the left, a mini switch on the right, so the switch matches the caption-sized text
+private struct QuickToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack {
+            configuration.label
+            Spacer()
+            Toggle("", isOn: configuration.$isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
     }
 }
 
@@ -316,7 +338,14 @@ struct LabeledSlider: View {
     var body: some View {
         LabeledContent(title) {
             HStack {
-                Slider(value: $value, in: range, step: step)
+                // No `step:`, which would draw a tick mark for every step
+                Slider(
+                    value: Binding(
+                        get: { value },
+                        set: { value = (($0 / step).rounded() * step).clamped(to: range) }
+                    ),
+                    in: range
+                )
                 Text(formatted)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -327,5 +356,11 @@ struct LabeledSlider: View {
 
     private var formatted: String {
         percent ? "\(Int((value * 100).rounded()))%" : "\(Int(value.rounded())) \(unit)"
+    }
+}
+
+private extension Double {
+    func clamped(to range: ClosedRange<Double>) -> Double {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }

@@ -22,7 +22,24 @@ struct ContentView: View {
     /// Whether the quick settings are expanded at the bottom
     @State private var showQuickSettings = false
 
+    /// The system's light/dark mode, before `contrastScheme` overrides it
+    @Environment(\.colorScheme) private var systemScheme
+
     private var artworkSize: CGFloat { CGFloat(settings.popoverArtworkSize) }
+
+    private var backgroundArtwork: NSImage? {
+        settings.popoverBlurredBackground ? adapter.artwork : nil
+    }
+
+    /// Light or dark content depending on how bright the blurred background ends up,
+    /// so text and controls stay readable over bright artwork
+    private var contrastScheme: ColorScheme? {
+        guard backgroundArtwork != nil, let luminance = adapter.artworkLuminance else { return nil }
+        let opacity = settings.popoverBackgroundOpacity
+        let material = systemScheme == .dark ? 0.15 : 0.9
+        let background = luminance * opacity + material * (1 - opacity)
+        return background > 0.55 ? .light : .dark
+    }
 
     var body: some View {
         VStack(spacing: settings.popoverSpacing) {
@@ -63,11 +80,16 @@ struct ContentView: View {
         .frame(width: settings.popoverWidth)
         .background {
             PopoverBackground(
-                artwork: settings.popoverBlurredBackground ? adapter.artwork : nil,
+                artwork: backgroundArtwork,
                 blurRadius: settings.popoverBlurRadius,
-                opacity: settings.popoverBackgroundOpacity
+                opacity: settings.popoverBackgroundOpacity,
+                scheme: contrastScheme
             )
         }
+        .environment(\.colorScheme, contrastScheme ?? systemScheme)
+        .animation(.easeInOut(duration: 0.3), value: contrastScheme)
+        // No keyboard focus rings on the icons and buttons
+        .focusEffectDisabled()
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -88,7 +110,9 @@ struct ContentView: View {
     private var topBar: some View {
         HStack(spacing: 6) {
             if let info = adapter.nowPlaying {
-                SourceLabel(info: info, domain: adapter.sourceDomain)
+                SourceLabel(info: info, domain: adapter.sourceDomain, style: settings.sourceLabelStyle) {
+                    adapter.revealSource()
+                }
             }
 
             Spacer(minLength: 0)
@@ -107,8 +131,7 @@ struct ContentView: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(IconButtonStyle())
-            .keyboardShortcut(",", modifiers: .command)
-            .help("Settings")
+            .help("Settings (⌘,)")
 
             // Quit button (also ⌘Q while the popover is open)
             Button(action: quit) {
@@ -361,10 +384,12 @@ struct PopoverBackground: View {
     let artwork: NSImage?
     let blurRadius: Double
     let opacity: Double
+    /// Light or dark, picked from the artwork's brightness (nil follows the system)
+    let scheme: ColorScheme?
 
     var body: some View {
         ZStack {
-            VisualEffectView(material: .popover)
+            VisualEffectView(material: .popover, scheme: scheme)
 
             if let artwork {
                 GeometryReader { geometry in
@@ -382,10 +407,9 @@ struct PopoverBackground: View {
                 .transition(.opacity)
                 .id(ObjectIdentifier(artwork))
 
-                // Keeps text readable over bright artwork
+                // Pushes the background further toward light or dark, for contrast with the content
                 Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .opacity(0.4)
+                    .fill(scheme == .light ? Color.white.opacity(0.3) : Color.black.opacity(0.25))
             }
         }
         .animation(.easeInOut(duration: 0.4), value: artwork.map { ObjectIdentifier($0) })
@@ -395,43 +419,69 @@ struct PopoverBackground: View {
 /// `NSVisualEffectView` for behind-window blur
 struct VisualEffectView: NSViewRepresentable {
     let material: NSVisualEffectView.Material
+    /// Forces a light or dark material (nil follows the system)
+    var scheme: ColorScheme?
 
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
-        view.material = material
         view.blendingMode = .behindWindow
         view.state = .active
+        updateNSView(view, context: context)
         return view
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         view.material = material
+        view.appearance = scheme.map { NSAppearance(named: $0 == .light ? .aqua : .darkAqua) } ?? nil
     }
 }
 
 // MARK: - Source Label
 
 /// Icon and name of the app that's playing
+/// Icon and/or name of the app that's playing; clicking it brings that app (or browser tab) forward
 struct SourceLabel: View {
     let info: NowPlayingInfo
     /// Domain it plays from, if known (shown on hover)
     var domain: String?
+    var style: SourceLabelStyle = .iconAndName
+    var action: () -> Void = {}
+
+    @State private var isHovering = false
 
     var body: some View {
         let app = SourceApp.lookup(info.sourceApp)
+        let name = app?.name ?? info.sourceApp ?? "Unknown app"
 
-        HStack(spacing: 5) {
-            if let icon = app?.icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 16, height: 16)
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if style.showsIcon, let icon = app?.icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 16, height: 16)
+                }
+                if style.showsName || app?.icon == nil {
+                    Text(name)
+                        .font(.caption)
+                        .foregroundStyle(isHovering ? .primary : .secondary)
+                        .lineLimit(1)
+                }
             }
-            Text(app?.name ?? info.sourceApp ?? "Unknown app")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .background {
+                Capsule()
+                    .fill(Color.primary.opacity(isHovering ? 0.12 : 0))
+            }
+            .contentShape(Capsule())
         }
-        .help(domain ?? info.sourceApp ?? "")
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .onHover { isHovering = $0 }
+        .pointerStyle(.link)
+        .help("Open \(name)" + (domain.map { " (\($0))" } ?? ""))
+        // Lines up the icon with the popover's padding despite the hover padding
+        .padding(.leading, -5)
     }
 }
 
@@ -479,6 +529,11 @@ struct CircleButtonStyle: ButtonStyle {
                 .background {
                     Circle()
                         .fill(isHovering ? settings.buttonHoverColor : settings.buttonBackgroundColor)
+                }
+                .overlay {
+                    // Barely visible edge, so the button shows even when its color matches the background
+                    Circle()
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
                 }
                 .contentShape(Circle())
                 .scaleEffect(configuration.isPressed ? 0.88 : (isHovering ? 1.08 : 1))

@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(adapter)
                 .environmentObject(settings)
 
-            let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+            let window = SettingsWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "NowPlayingBar Settings"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false
@@ -69,5 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
+        // In case macOS doesn't let the app activate
+        settingsWindow?.orderFrontRegardless()
     }
 }

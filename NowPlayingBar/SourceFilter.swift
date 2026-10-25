@@ -90,6 +90,50 @@ final class SourceFilter {
         }
     }
 
+    // MARK: - Reveal
+    
+    /// Bring the source forward: the browser tab whose title contains the track title, or the app itself
+    func reveal(_ info: NowPlayingInfo) {
+        guard let bundleID = info.sourceApp else { return }
+        
+        if let titleKey = Self.browsers[bundleID], let title = info.displayTitle, !title.isEmpty {
+            let escaped = title
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            // Safari selects a tab with `current tab`, Chrome-based browsers with `active tab index`
+            let select = titleKey == "name"
+                ? "set current tab of w to tab i of w"
+                : "set active tab index of w to i"
+            let source = """
+            tell application id "\(bundleID)"
+                repeat with w in windows
+                    repeat with i from 1 to count of tabs of w
+                        if \(titleKey) of tab i of w contains "\(escaped)" then
+                            \(select)
+                            set index of w to 1
+                            activate
+                            return
+                        end if
+                    end repeat
+                end repeat
+                activate
+            end tell
+            """
+            Task.detached {
+                var error: NSDictionary?
+                NSAppleScript(source: source)?.executeAndReturnError(&error)
+                if let error {
+                    print("⚠️ Couldn't select the tab in \(bundleID): \(error)")
+                }
+            }
+            return
+        }
+        
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+    
     // MARK: - Web Apps
 
     /// Host of a Safari web app's start URL, read from `Manifest.start_url` in its Info.plist

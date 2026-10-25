@@ -63,6 +63,10 @@ final class StatusItemController: NSObject {
         .environmentObject(settings)
 
         panel.contentView = FirstMouseHostingView(rootView: content)
+        panel.onOpenSettings = { [weak self] in
+            guard let self else { return }
+            openSettings(self.panel.frame)
+        }
         panel.onAutoClose = { [weak self] in
             self?.lastAutoClose = Date()
             self?.statusItem.button?.highlight(false)
@@ -97,7 +101,8 @@ final class StatusItemController: NSObject {
     }
 
     private func showPanel() {
-        NSApp.activate()
+        // A non-activating panel becomes key without activating the app, which macOS may refuse
+        // for an app without a Dock icon; key is what gives controls their active look
         if let content = panel.contentView {
             panel.setContentSize(content.fittingSize)
         }
@@ -157,10 +162,13 @@ final class PopoverPanel: NSPanel {
     /// Called when the panel closes because the user clicked elsewhere
     var onAutoClose: (() -> Void)?
 
+    /// Called for ⌘,
+    var onOpenSettings: (() -> Void)?
+
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 300, height: 400),
-            styleMask: [.borderless, .fullSizeContentView],
+            styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: true
         )
@@ -188,6 +196,25 @@ final class PopoverPanel: NSPanel {
         }
     }
 
+    /// The app has no main menu (no Dock icon), so its usual shortcuts are handled here
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == .command {
+            switch event.charactersIgnoringModifiers {
+            case ",":
+                onOpenSettings?()
+                return true
+            case "w":
+                orderOut(nil)
+                onAutoClose?()
+                return true
+            default:
+                break
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func cancelOperation(_ sender: Any?) {
         // Escape closes the popover
         orderOut(nil)
@@ -206,4 +233,22 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
 /// react on the first try
 final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+// MARK: - Settings Window
+
+/// Settings window that closes with Escape or ⌘W (the app has no main menu to provide ⌘W)
+final class SettingsWindow: NSWindow {
+    override func cancelOperation(_ sender: Any?) {
+        performClose(sender)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == .command, event.charactersIgnoringModifiers == "w" {
+            performClose(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }

@@ -35,7 +35,11 @@ final class AppSettings: ObservableObject {
     @Published var menuBarBackgroundColor: Color { didSet { save(menuBarBackgroundColor, .menuBarBackgroundColor) } }
     @Published var menuBarBackgroundOpacity: Double { didSet { save(menuBarBackgroundOpacity, .menuBarBackgroundOpacity) } }
 
-    /// Opacity of the menu bar item while paused (1 = no dimming)
+    /// Use `menuBarTextColor` instead of the menu bar's own text color
+    @Published var menuBarTextColorEnabled: Bool { didSet { save(menuBarTextColorEnabled, .menuBarTextColorEnabled) } }
+    @Published var menuBarTextColor: Color { didSet { save(menuBarTextColor, .menuBarTextColor) } }
+    
+    /// Opacity of the menu bar item's artwork and text while paused (1 = no dimming)
     @Published var menuBarPausedOpacity: Double { didSet { save(menuBarPausedOpacity, .menuBarPausedOpacity) } }
 
     /// Use `menuBarPausedColor` for the text while paused
@@ -66,6 +70,9 @@ final class AppSettings: ObservableObject {
     @Published var buttonBackgroundColor: Color { didSet { save(buttonBackgroundColor, .buttonBackgroundColor) } }
     @Published var buttonHoverColor: Color { didSet { save(buttonHoverColor, .buttonHoverColor) } }
 
+    /// What the source label at the top of the popover shows
+    @Published var sourceLabelStyle: SourceLabelStyle { didSet { save(sourceLabelStyle.rawValue, .sourceLabelStyle) } }
+    
     /// Fill of the seek bar
     @Published var seekBarColor: Color { didSet { save(seekBarColor, .seekBarColor) } }
 
@@ -101,6 +108,8 @@ final class AppSettings: ObservableObject {
         menuBarBackgroundEnabled = defaults.object(forKey: Key.menuBarBackgroundEnabled.rawValue) as? Bool ?? true
         menuBarBackgroundColor = Self.color(defaults, .menuBarBackgroundColor) ?? .gray
         menuBarBackgroundOpacity = defaults.object(forKey: Key.menuBarBackgroundOpacity.rawValue) as? Double ?? 0.2
+        menuBarTextColorEnabled = defaults.object(forKey: Key.menuBarTextColorEnabled.rawValue) as? Bool ?? false
+        menuBarTextColor = Self.color(defaults, .menuBarTextColor) ?? .primary
         menuBarPausedOpacity = defaults.object(forKey: Key.menuBarPausedOpacity.rawValue) as? Double ?? 0.5
         menuBarPausedTintEnabled = defaults.object(forKey: Key.menuBarPausedTintEnabled.rawValue) as? Bool ?? false
         menuBarPausedColor = Self.color(defaults, .menuBarPausedColor) ?? .secondary
@@ -116,6 +125,8 @@ final class AppSettings: ObservableObject {
         buttonBackgroundColor = Self.color(defaults, .buttonBackgroundColor) ?? Color.primary.opacity(0.08)
         buttonHoverColor = Self.color(defaults, .buttonHoverColor) ?? Color.primary.opacity(0.18)
         seekBarColor = Self.color(defaults, .seekBarColor) ?? .accentColor
+        sourceLabelStyle = defaults.string(forKey: Key.sourceLabelStyle.rawValue)
+            .flatMap(SourceLabelStyle.init(rawValue:)) ?? .iconAndName
         
         sourceFilterEnabled = defaults.object(forKey: Key.sourceFilterEnabled.rawValue) as? Bool ?? true
         allowedDomains = defaults.stringArray(forKey: Key.allowedDomains.rawValue) ?? ["music.youtube.com"]
@@ -138,6 +149,8 @@ final class AppSettings: ObservableObject {
         menuBarBackgroundEnabled = fresh.menuBarBackgroundEnabled
         menuBarBackgroundColor = fresh.menuBarBackgroundColor
         menuBarBackgroundOpacity = fresh.menuBarBackgroundOpacity
+        menuBarTextColorEnabled = fresh.menuBarTextColorEnabled
+        menuBarTextColor = fresh.menuBarTextColor
         menuBarPausedOpacity = fresh.menuBarPausedOpacity
         menuBarPausedTintEnabled = fresh.menuBarPausedTintEnabled
         menuBarPausedColor = fresh.menuBarPausedColor
@@ -151,6 +164,7 @@ final class AppSettings: ObservableObject {
         buttonBackgroundColor = fresh.buttonBackgroundColor
         buttonHoverColor = fresh.buttonHoverColor
         seekBarColor = fresh.seekBarColor
+        sourceLabelStyle = fresh.sourceLabelStyle
 
         // The assignments above saved the defaults again; clear them so future default changes apply
         for key in Key.lookKeys {
@@ -167,6 +181,7 @@ final class AppSettings: ObservableObject {
         case popoverArtworkSize, popoverTextAlignment, popoverSpacing, popoverShowAlbum
         case popoverBlurredBackground, popoverBlurRadius, popoverBackgroundOpacity
         case buttonBackgroundColor, buttonHoverColor, seekBarColor
+        case menuBarTextColorEnabled, menuBarTextColor, sourceLabelStyle
         case sourceFilterEnabled, allowedDomains, allowedApps, browserTabLookupEnabled
         
         /// Everything except the source settings
@@ -207,4 +222,21 @@ enum PopoverTextAlignment: String, CaseIterable, Identifiable {
     var frame: Alignment {
         self == .leading ? .leading : .center
     }
+}
+
+enum SourceLabelStyle: String, CaseIterable, Identifiable {
+    case iconAndName, iconOnly, nameOnly
+    
+    var id: String { rawValue }
+    
+    var title: String {
+        switch self {
+        case .iconAndName: "Icon and name"
+        case .iconOnly: "Icon only"
+        case .nameOnly: "Name only"
+        }
+    }
+    
+    var showsIcon: Bool { self != .nameOnly }
+    var showsName: Bool { self != .iconOnly }
 }
