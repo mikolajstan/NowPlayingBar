@@ -540,7 +540,7 @@ struct CircleButtonStyle: ButtonStyle {
             // A mostly opaque circle decides on its own; a faint one mostly shows the popover
             let coverage = circle.opacity >= 0.5 ? 1 : circle.opacity
             let blended = coverage * luminance + (1 - coverage) * backdrop
-            return blended > 0.2 ? .black : .white
+            return blended > 0.3 ? .black : .white
         }
 
         var body: some View {
