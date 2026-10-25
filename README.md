@@ -8,9 +8,11 @@ A small macOS menu bar app that shows the track that is currently playing and le
 - Click it to open a popover with artwork, title, artist, album and the app that's playing, over a blurred copy of the artwork.
 - Seek bar with elapsed and total time. Click or drag it to seek.
 - Previous, play/pause and next buttons.
-- Settings for the width, background and paused look of the menu bar item and the layout and colors of the popover, with quick settings inside the popover.
+- Settings for the width, background, text color and paused look of the menu bar item and the layout and colors of the popover, with quick settings inside the popover.
+- Click the app name in the popover to bring the playing app (or browser tab) forward.
+- Shortcuts while the popover is open: ⌘, for settings, ⌘W or Esc to close, ⌘Q to quit.
 - Works with anything that reports to macOS's Now Playing, including browser players such as YouTube Music in Safari or Chrome, as well as Music, Spotify and others. By default only music.youtube.com is shown; allowed domains and apps can be changed in Settings > Sources.
-- Runs only in the menu bar, with no Dock icon.
+- Runs only in the menu bar, with no Dock icon, and only one copy at a time.
 
 ## How it works
 

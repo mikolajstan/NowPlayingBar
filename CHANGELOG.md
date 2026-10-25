@@ -1,17 +1,34 @@
 # Changelog
 
-## Unreleased
+## 1.1 - 2026-10-25
 
-- Instant feedback on next/previous: buttons react when pressed, the artwork dims with a spinner and the progress bar resets until the new track arrives.
-- Quit button (power icon) in the popover, also ⌘Q while it is open. Quitting stops the adapter process too.
-- Artwork is decoded once per track instead of on every redraw, and the full JSON of each update is no longer logged.
-- Menu bar item with a stable width, smooth pixel-by-pixel scrolling, tiny artwork before the title, an optional background, and a dimmed look while paused.
-- The popover opens under the right edge of the menu bar item and keeps its position and size.
-- Redesigned popover: blurred artwork background, same-size artwork placeholder, round playback buttons with hover and press feedback, a seek bar that grows on hover with a knob and time preview, times at both ends of the seek bar, the source app's icon and name, and crossfades between tracks.
-- The seek bar reacts to clicks anywhere on it, on the first click.
-- Settings window (gear button) for the look of the menu bar item and popover, plus quick settings inside the popover.
-- Only allowed sources are shown, by default music.youtube.com (YouTube Music web apps, or a browser tab as a fallback), so YouTube videos stay out of the menu bar. Allowed domains and apps can be changed in Settings.
+### Menu bar
+- Stable width (or shrink to fit) with smooth scrolling for long titles, which loops seamlessly and keeps going while paused.
+- Tiny artwork before the title, an optional background with its own color, opacity, padding and height, and a custom text color.
+- Paused tracks dim the artwork and text (or use a different text color), leaving the background as it is.
+
+### Popover
+- Opens under the right edge of the menu bar item and keeps its position and size. Optionally stays open when you switch to another app.
+- Blurred artwork background, with text and controls switching between light and dark to stay readable over bright artwork.
+- Fixed-size artwork with a matching placeholder, rounded corners and a softer shadow, plus crossfades between tracks.
+- Round playback buttons that highlight and grow on hover and shrink when pressed, with a faint border and icons that pick black or white to match the button color.
+- Seek bar that reacts to clicks anywhere on it (on the first click), grows on hover and shows a knob and the time under the cursor, with elapsed and total time at its ends.
+- The playing app's icon and name at the top; click it to bring that app (or browser tab) forward.
+- Instant feedback on next/previous: the artwork dims with a spinner and the progress resets until the new track arrives.
+- Quit button (power icon), plus ⌘, for settings, ⌘W or Esc to close and ⌘Q to quit.
+- Nicer "Nothing playing", loading and error states.
+
+### Settings
+- Settings window (gear button) for the menu bar item, the popover's layout and colors, and sources, plus quick settings inside the popover. Esc or ⌘W closes it, and the popover stays open beside it while you adjust things.
+
+### Sources
+- Only allowed sources are shown, by default music.youtube.com, so YouTube videos stay out of the menu bar. The domain comes from the web app (e.g. YouTube Music added to the Dock from Safari) or, for a plain browser tab, from Safari or a Chrome-based browser.
+- Allowed domains and apps can be edited in Settings > Sources.
+
+### Fixes
+- Only one copy of the app runs at a time; opening it again shows the running copy's popover.
 - Titles with HTML entities such as "&amp;" show the actual character.
+- Artwork is decoded once per track instead of on every redraw, and the full JSON of each update is no longer logged.
 
 ## 1.0 - 2026-10-24
 
