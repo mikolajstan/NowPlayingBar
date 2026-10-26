@@ -102,6 +102,18 @@ private struct PopoverSettings: View {
                     .disabled(!settings.popoverBlurredBackground)
             }
 
+            Section {
+                Toggle("Show the next songs", isOn: $settings.popoverShowUpNext)
+                Stepper("Songs shown: \(settings.popoverUpNextCount)", value: $settings.popoverUpNextCount, in: 1...10)
+                    .disabled(!settings.popoverShowUpNext)
+            } header: {
+                Text("Up next")
+            } footer: {
+                Text("Read from the YouTube Music web app. Needs Accessibility access, and the queue shows up once its player page has been opened.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Colors") {
                 ColorPicker("Button background", selection: $settings.buttonBackgroundColor)
                 ColorPicker("Button background on hover", selection: $settings.buttonHoverColor)

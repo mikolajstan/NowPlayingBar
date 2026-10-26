@@ -68,6 +68,10 @@ final class AppSettings: ObservableObject {
 
     @Published var popoverShowAlbum: Bool { didSet { save(popoverShowAlbum, .popoverShowAlbum) } }
 
+    /// The next songs in the YouTube Music queue, under the playback controls
+    @Published var popoverShowUpNext: Bool { didSet { save(popoverShowUpNext, .popoverShowUpNext) } }
+    @Published var popoverUpNextCount: Int { didSet { save(popoverUpNextCount, .popoverUpNextCount) } }
+
     /// Blurred artwork behind the whole popover
     @Published var popoverBlurredBackground: Bool { didSet { save(popoverBlurredBackground, .popoverBlurredBackground) } }
     @Published var popoverBlurRadius: Double { didSet { save(popoverBlurRadius, .popoverBlurRadius) } }
@@ -135,6 +139,8 @@ final class AppSettings: ObservableObject {
             .flatMap(PopoverTextAlignment.init(rawValue:)) ?? .center
         popoverSpacing = defaults.object(forKey: Key.popoverSpacing.rawValue) as? Double ?? 14
         popoverShowAlbum = defaults.object(forKey: Key.popoverShowAlbum.rawValue) as? Bool ?? true
+        popoverShowUpNext = defaults.object(forKey: Key.popoverShowUpNext.rawValue) as? Bool ?? true
+        popoverUpNextCount = defaults.object(forKey: Key.popoverUpNextCount.rawValue) as? Int ?? 3
         popoverBlurredBackground = defaults.object(forKey: Key.popoverBlurredBackground.rawValue) as? Bool ?? true
         popoverBlurRadius = defaults.object(forKey: Key.popoverBlurRadius.rawValue) as? Double ?? 40
         popoverBackgroundOpacity = defaults.object(forKey: Key.popoverBackgroundOpacity.rawValue) as? Double ?? 0.6
@@ -179,6 +185,8 @@ final class AppSettings: ObservableObject {
         popoverTextAlignment = fresh.popoverTextAlignment
         popoverSpacing = fresh.popoverSpacing
         popoverShowAlbum = fresh.popoverShowAlbum
+        popoverShowUpNext = fresh.popoverShowUpNext
+        popoverUpNextCount = fresh.popoverUpNextCount
         popoverBlurredBackground = fresh.popoverBlurredBackground
         popoverBlurRadius = fresh.popoverBlurRadius
         popoverBackgroundOpacity = fresh.popoverBackgroundOpacity
@@ -207,6 +215,7 @@ final class AppSettings: ObservableObject {
         case menuBarTextColorEnabled, menuBarTextColor, sourceLabelStyle
         case menuBarHorizontalPadding, menuBarBackgroundInset, popoverStaysOpen
         case buttonIconColorEnabled, buttonIconColor
+        case popoverShowUpNext, popoverUpNextCount
         case sourceFilterEnabled, allowedDomains, allowedApps, browserTabLookupEnabled
         
         /// Everything except the source settings

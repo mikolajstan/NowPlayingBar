@@ -8,6 +8,7 @@ A small macOS menu bar app that shows the track that is currently playing and le
 - Click it to open a popover with artwork, title, artist, album and the app that's playing, over a blurred copy of the artwork.
 - Seek bar with elapsed and total time. Click or drag it to seek.
 - Previous, play/pause and next buttons.
+- "Up next": the next songs in the queue of the YouTube Music web app, under the playback controls.
 - Settings for the width, background, text color and paused look of the menu bar item and the layout and colors of the popover, with quick settings inside the popover.
 - Click the app name in the popover to bring the playing app (or browser tab) forward.
 - Shortcuts while the popover is open: ⌘, for settings, ⌘W or Esc to close, ⌘Q to quit.
@@ -21,6 +22,8 @@ Since macOS 15.4, apps can no longer read the system's Now Playing info directly
 The adapter is bundled inside the app, so nothing needs to be installed separately. Its source lives in `Vendor/mediaremote-adapter`, and `Scripts/build-mediaremote-adapter.sh` compiles it into the app during the build. At launch the app runs the adapter's self-test and shows an error in the popover if it fails.
 
 Sources are filtered by domain. The adapter only reports which app is playing, so the domain of a web app (for example a YouTube Music app made with Safari's Add to Dock) is read from the app's Info.plist. For a regular browser tab, the app asks Safari or a Chrome-based browser over AppleScript which tab is playing, which needs a one-time Automation permission.
+
+The Now Playing info in macOS doesn't include the queue for web players, so "Up next" reads it from the YouTube Music web app's page through the Accessibility API. This needs the Accessibility permission (Privacy & Security > Accessibility), and YouTube Music only puts the queue on the page once its player page has been opened. Browser tabs aren't supported yet.
 
 ## Requirements
 
