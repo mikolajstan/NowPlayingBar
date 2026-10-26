@@ -3,6 +3,7 @@
 ## Unreleased
 
 - App icon.
+- "Up next" in the popover: the next songs in the YouTube Music web app's queue, read through Accessibility. It can be turned off and the number of songs set in Settings > Popover.
 
 ## 1.1 - 2026-10-25
 

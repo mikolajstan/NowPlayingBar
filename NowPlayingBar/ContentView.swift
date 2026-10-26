@@ -22,6 +22,9 @@ struct ContentView: View {
     /// Whether the quick settings are expanded at the bottom
     @State private var showQuickSettings = false
 
+    /// The next songs in the YouTube Music queue
+    @StateObject private var upNext = UpNextReader()
+
     /// The system's light/dark mode, before `contrastScheme` overrides it
     @Environment(\.colorScheme) private var systemScheme
 
@@ -98,6 +101,10 @@ struct ContentView: View {
         .onAppear {
             // Start the adapter when the view appears
             adapter.start()
+            upNext.update(for: adapter.nowPlaying)
+        }
+        .onChange(of: adapter.nowPlaying) { _, newValue in
+            upNext.update(for: newValue)
         }
         .onDisappear {
             stopTimer()
@@ -235,6 +242,12 @@ struct ContentView: View {
                 }
                 .buttonStyle(CircleButtonStyle(diameter: 40))
                 .help("Next Track")
+            }
+
+            if settings.popoverShowUpNext && upNext.state != .unsupported {
+                UpNextView(reader: upNext, count: settings.popoverUpNextCount) {
+                    adapter.revealSource()
+                }
             }
         }
         .animation(.easeInOut(duration: 0.3), value: trackKey)
@@ -375,6 +388,77 @@ func formatTime(_ seconds: Double) -> String {
     let minutes = totalSeconds / 60
     let remainingSeconds = totalSeconds % 60
     return String(format: "%d:%02d", minutes, remainingSeconds)
+}
+
+// MARK: - Up Next
+
+/// The next songs in the queue, or what's needed to read them
+struct UpNextView: View {
+    @ObservedObject var reader: UpNextReader
+    let count: Int
+    /// Brings the web app forward, to open its player page
+    var openSource: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Up next")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            switch reader.state {
+            case .needsPermission:
+                hint("Allow NowPlayingBar to use Accessibility to read the queue from YouTube Music.",
+                     button: "Allow Access…", action: reader.requestPermission)
+            case .playerPageClosed:
+                hint("Open the player page in YouTube Music once to see what's next.",
+                     button: "Open YouTube Music", action: openSource)
+            case .ready where reader.upcoming.isEmpty:
+                Text("Nothing up next")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            case .ready, .unsupported:
+                ForEach(reader.upcoming.prefix(count)) { item in
+                    row(item)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.2), value: reader.upcoming)
+    }
+
+    private func row(_ item: QueueItem) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.callout)
+                    .lineLimit(1)
+                Text(item.artist)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if let duration = item.duration {
+                Text(duration)
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func hint(_ message: String, button: String, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(button, action: action)
+                .controlSize(.small)
+        }
+    }
 }
 
 // MARK: - Background
